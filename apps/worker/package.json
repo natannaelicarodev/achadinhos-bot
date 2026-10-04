@@ -13,6 +13,7 @@
   "dependencies": {
     "@achadinhos/db": "workspace:*",
     "@achadinhos/jobs": "workspace:*",
+    "@achadinhos/stores": "workspace:^",
     "baileys": "7.0.0-rc14",
     "bullmq": "^6.3.11",
     "grammy": "^1.46.0",

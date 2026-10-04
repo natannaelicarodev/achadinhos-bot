@@ -36,6 +36,7 @@ describe("forTenant: leitura", () => {
       dbA.whatsAppSessionKey.findMany(),
       dbA.featureRequest.findMany(),
       dbA.favorite.findMany(),
+      dbA.messageTemplate.findMany(),
     ]);
     for (const rows of lists) {
       expect(rows).toHaveLength(1);
@@ -55,6 +56,10 @@ describe("forTenant: leitura", () => {
     expect(await dbA.conversion.findUnique({ where: { id: b.conversion.id } })).toBeNull();
     expect(await dbA.storeCredential.findUnique({ where: { id: b.credential.id } })).toBeNull();
     expect(await dbA.user.findUnique({ where: { email: b.user.email } })).toBeNull();
+    // A chave do MessageTemplate é o próprio tenantId: pedir o de B nem chega ao banco.
+    await expect(dbA.messageTemplate.findUnique({ where: { tenantId: b.tenant.id } })).rejects.toBeInstanceOf(
+      TenantScopeError,
+    );
     expect(await dbA.whatsAppSession.findUnique({ where: { channelId: b.channel.id } })).toBeNull();
     expect(
       await dbA.whatsAppSessionKey.findUnique({
@@ -227,6 +232,7 @@ describe("exclusão de tenant", () => {
       db.prisma.whatsAppSessionKey.count({ where }),
       db.prisma.featureRequest.count({ where }),
       db.prisma.favorite.count({ where }),
+      db.prisma.messageTemplate.count({ where }),
     ]);
     expect(counts.every((n) => n === 0)).toBe(true);
     expect(await db.prisma.offer.count({ where: { tenantId: b.tenant.id } })).toBe(1);

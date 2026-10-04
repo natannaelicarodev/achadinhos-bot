@@ -1,19 +1,9 @@
-import { createHash } from "node:crypto";
 import { createTestDatabase, type TestDatabase } from "@achadinhos/db/testing";
 import type { MinedProduct } from "@achadinhos/db";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { AMAZON_DISABLED_REASONS, AMAZON_TOKEN_URL, AmazonCreatorsClient, AmazonMiner } from "../src/catalog/amazon";
 import { runCatalogMining } from "../src/catalog/run";
-import {
-  parseProductOffers,
-  productOfferQuery,
-  SHOPEE_CATEGORY_KEYWORDS,
-  SHOPEE_GRAPHQL_URL,
-  ShopeeAffiliateClient,
-  ShopeeMiner,
-  shopeeSignature,
-  toMinedProduct,
-} from "../src/catalog/shopee";
+import { SHOPEE_CATEGORY_KEYWORDS, ShopeeMiner } from "../src/catalog/shopee";
 import type { CatalogMiner } from "../src/catalog/types";
 import { closeInterruptedRuns, miningIsDue, processCatalogJob } from "../src/queues/catalog";
 import { silentLogger } from "./helpers";
@@ -44,88 +34,6 @@ const graphqlOk = (nodes: unknown[]) =>
     headers: { "content-type": "application/json" },
   });
 
-describe("Shopee: assinatura e requisição", () => {
-  it("assinatura = SHA256(AppId + Timestamp + Payload + Secret) e cabeçalho no formato da Shopee", async () => {
-    const fetchMock = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => graphqlOk([]));
-    const client = new ShopeeAffiliateClient({
-      appId: "123456",
-      secret: "segredo",
-      fetch: fetchMock as unknown as typeof fetch,
-      now: () => 1_700_000_000,
-    });
-    await client.query("{ productOfferV2(page: 1, limit: 1) { nodes { itemId } } }");
-
-    const [url, init] = fetchMock.mock.calls[0]!;
-    const body = String(init?.body);
-    const expected = createHash("sha256").update(`1234561700000000${body}segredo`).digest("hex");
-    expect(url).toBe(SHOPEE_GRAPHQL_URL);
-    expect(body).toBe(JSON.stringify({ query: "{ productOfferV2(page: 1, limit: 1) { nodes { itemId } } }" }));
-    expect((init?.headers as Record<string, string>).Authorization).toBe(
-      `SHA256 Credential=123456, Timestamp=1700000000, Signature=${expected}`,
-    );
-    expect(shopeeSignature("123456", 1_700_000_000, body, "segredo")).toBe(expected);
-  });
-
-  it("erro GraphQL vira exceção com a mensagem da Shopee", async () => {
-    const client = new ShopeeAffiliateClient({
-      appId: "1",
-      secret: "s",
-      fetch: (async () =>
-        new Response(JSON.stringify({ errors: [{ message: "Invalid Signature", extensions: { code: 10020 } }] }))) as unknown as typeof fetch,
-    });
-    await expect(client.query("{}")).rejects.toMatchObject({ message: "Invalid Signature", code: 10020 });
-  });
-
-  it("consulta: palavra-chave escapada, itemId só numérico e SEM pedir offerLink", () => {
-    const q = productOfferQuery({ keyword: 'fone "bluetooth"', sortType: 2, page: 1, limit: 50 });
-    expect(q).toContain('keyword: "fone \\"bluetooth\\""');
-    expect(q).toContain("sortType: 2");
-    expect(q).not.toContain("offerLink");
-    expect(productOfferQuery({ itemId: "987", page: 1, limit: 1 })).toContain("itemId: 987");
-    expect(() => productOfferQuery({ itemId: "1) { x }", page: 1, limit: 1 })).toThrow();
-  });
-});
-
-describe("Shopee: conversão da resposta", () => {
-  it("converte texto em centavos e %, calcula preço original e usa só o link limpo", () => {
-    expect(toMinedProduct(shopeeNode(42), "ELECTRONICS")).toEqual<MinedProduct>({
-      store: "SHOPEE",
-      externalId: "42",
-      title: "Fone Bluetooth 42",
-      imageUrl: "https://cf.shopee.com.br/file/42",
-      productUrl: "https://shopee.com.br/product/111/42",
-      category: "ELECTRONICS",
-      priceCents: 5990,
-      originalPriceCents: 9983,
-      discountPct: 40,
-      commissionPct: 8,
-      commissionCents: 479,
-      rating: 4.8,
-      soldCount: 12500,
-    });
-  });
-
-  it("sem nota (0), sem desconto e comissão só em %: campos coerentes", () => {
-    const p = toMinedProduct(shopeeNode(7, { ratingStar: "0", priceDiscountRate: 0, commission: null }), "PETS");
-    expect(p).toMatchObject({ rating: null, discountPct: null, originalPriceCents: null, commissionCents: 479 });
-  });
-
-  it("descarta item sem preço, sem título ou com link inválido", () => {
-    expect(toMinedProduct(shopeeNode(1, { priceMin: "", priceMax: "0" }), "PETS")).toBeNull();
-    expect(toMinedProduct(shopeeNode(2, { productName: "" }), "PETS")).toBeNull();
-    expect(toMinedProduct(shopeeNode(3, { productLink: "nao-e-link" }), "PETS")).toBeNull();
-    const list = parseProductOffers(
-      { productOfferV2: { nodes: [shopeeNode(10), shopeeNode(11, { priceMin: null, priceMax: null })] } },
-      "PETS",
-    );
-    expect(list.map((p) => p.externalId)).toEqual(["10"]);
-  });
-
-  it("nenhum produto convertido carrega o link de afiliado da conta central", () => {
-    const p = toMinedProduct(shopeeNode(99), "BEAUTY");
-    expect(JSON.stringify(p)).not.toContain("s.shopee.com.br");
-  });
-});
 
 describe("Shopee: minerador", () => {
   it("desligado sem credencial central", () => {

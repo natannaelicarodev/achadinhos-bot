@@ -55,6 +55,7 @@ enum Store {
   MAGALU
   ALIEXPRESS
   OTHER
+  SHEIN
 }
 
 enum OfferStatus {
@@ -113,6 +114,7 @@ model Tenant {
   whatsAppKeys     WhatsAppSessionKey[]
   featureRequests  FeatureRequest[]
   favorites        Favorite[]
+  messageTemplate  MessageTemplate?
 }
 
 // ---------- Auth ----------
@@ -294,6 +296,8 @@ model Offer {
   posts              Post[]
   clicks             Click[]
   conversions        Conversion[]
+  messageText        String? // mensagem pronta (template já preenchido) na hora do "Enviar para meus grupos"
+  sendRequestedAt    DateTime? // pedido de envio; a fila de envio aos grupos é da fase 5
   // Produto do catálogo central de onde a oferta veio ("Divulgar este produto").
   catalogProductId   String?
   catalogProduct     CatalogProduct? @relation(fields: [catalogProductId], references: [id], onDelete: SetNull)
@@ -450,17 +454,29 @@ model Conversion {
 }
 
 model StoreCredential {
-  id         String   @id @default(cuid())
+  id         String    @id @default(cuid())
   tenantId   String
-  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   store      Store
   label      String?
   ciphertext Bytes // AES-256-GCM do JSON das credenciais
   iv         Bytes // 12 bytes, aleatório por gravação
   authTag    Bytes // 16 bytes
-  keyVersion Int      @default(1)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  keyVersion Int       @default(1)
+  verifiedAt DateTime? // "Sincronizado": teste real ok (Shopee) ou dados validados (demais lojas)
+  lastError  String? // motivo em pt-BR do último teste que falhou
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
   @@unique([tenantId, store])
+}
+
+// Modelo da mensagem de divulgação do tenant (um por tenant).
+// Variáveis: {headline} {titulo} {preco_de} {preco_por} {desconto} {link}
+model MessageTemplate {
+  tenantId  String   @id
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  body      String
+  headline  String // valor padrão de {headline} (editável em cada mensagem)
+  updatedAt DateTime @updatedAt
 }

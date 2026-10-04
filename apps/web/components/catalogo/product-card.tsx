@@ -2,8 +2,10 @@
 
 import type { CatalogCategory, Store } from "@achadinhos/db";
 import { HeartIcon, StarIcon } from "lucide-react";
-import { useState, useTransition } from "react";
-import { promoteProductAction, toggleFavoriteAction } from "@/app/painel/catalogo/actions";
+import { useEffect, useState, useTransition } from "react";
+import { toggleFavoriteAction } from "@/app/painel/catalogo/actions";
+import { previewCatalogProductAction, type SharePreview } from "@/app/painel/divulgar-link/actions";
+import { SharePanel } from "@/components/divulgar/share-panel";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { CATEGORY_LABEL, formatBRL, formatCommission, formatSold, STORE_LABEL } from "@/lib/catalog";
@@ -42,11 +44,28 @@ function ProductImage({ item, className }: { item: CatalogItemView; className?: 
   );
 }
 
+/** Link do cliente e mensagem: gerados quando o modal abre. */
+function CatalogShare({ productId }: { productId: string }) {
+  const [state, setState] = useState<{ preview: SharePreview } | { error: string } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void previewCatalogProductAction(productId).then((result) => {
+      if (!cancelled) setState(result.ok ? { preview: result.preview } : { error: result.error });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [productId]);
+
+  if (!state) return <p className="text-sm text-muted-foreground">Gerando seu link de afiliado...</p>;
+  if ("error" in state) return <p className="text-sm text-destructive">{state.error}</p>;
+  return <SharePanel preview={state.preview} editableInfo={false} />;
+}
+
 export function ProductCard({ item }: { item: CatalogItemView }) {
   const [open, setOpen] = useState(false);
   const [favorite, setFavorite] = useState(item.isFavorite);
-  const [hasOffer, setHasOffer] = useState(item.hasOffer);
-  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
   const toggleFavorite = () =>
@@ -55,19 +74,9 @@ export function ProductCard({ item }: { item: CatalogItemView }) {
       const result = await toggleFavoriteAction(item.id);
       if ("error" in result) {
         setFavorite(item.isFavorite);
-        setMessage({ ok: false, text: result.error });
+        setError(result.error);
       } else {
         setFavorite(result.favorite);
-      }
-    });
-
-  const promote = () =>
-    startTransition(async () => {
-      const result = await promoteProductAction(item.id);
-      if ("error" in result) setMessage({ ok: false, text: result.error });
-      else {
-        setHasOffer(true);
-        setMessage({ ok: true, text: result.message });
       }
     });
 
@@ -81,12 +90,6 @@ export function ProductCard({ item }: { item: CatalogItemView }) {
       aria-label={favorite ? "Remover dos favoritos" : "Adicionar aos favoritos"}
     >
       <HeartIcon className={cn(favorite && "fill-red-500 text-red-500")} />
-    </Button>
-  );
-
-  const promoteButton = (
-    <Button onClick={promote} disabled={pending} className="w-full" variant={hasOffer ? "outline" : "default"}>
-      {hasOffer ? "Já está nas suas ofertas" : pending ? "Adicionando..." : "Divulgar este produto"}
     </Button>
   );
 
@@ -111,11 +114,7 @@ export function ProductCard({ item }: { item: CatalogItemView }) {
         </button>
         <div className="flex flex-1 flex-col gap-2 p-3">
           <p className="text-xs text-muted-foreground">{CATEGORY_LABEL[item.category]}</p>
-          <button
-            type="button"
-            onClick={() => setOpen(true)}
-            className="line-clamp-2 text-left text-sm font-medium hover:underline"
-          >
+          <button type="button" onClick={() => setOpen(true)} className="line-clamp-2 text-left text-sm font-medium hover:underline">
             {item.title}
           </button>
           <div className="mt-auto grid gap-1">
@@ -125,83 +124,73 @@ export function ProductCard({ item }: { item: CatalogItemView }) {
             </p>
           </div>
           <div className="flex items-center gap-1">
-            {promoteButton}
+            <Button onClick={() => setOpen(true)} className="w-full" variant={item.hasOffer ? "outline" : "default"}>
+              {item.hasOffer ? "Divulgar de novo" : "Divulgar este produto"}
+            </Button>
             {favoriteButton}
           </div>
-          {message && !open ? (
-            <p className={cn("text-xs", message.ok ? "text-green-700" : "text-destructive")} role="status">
-              {message.text}
-            </p>
-          ) : null}
+          {error ? <p className="text-xs text-destructive">{error}</p> : null}
         </div>
       </article>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="sm:max-w-2xl">
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
           <DialogHeader>
             <div className="flex items-center gap-2">
               <StoreBadge store={item.store} />
               <span className="text-xs text-muted-foreground">{CATEGORY_LABEL[item.category]}</span>
             </div>
             <DialogTitle className="text-left leading-snug">{item.title}</DialogTitle>
-            <DialogDescription className="sr-only">Detalhes do produto do catálogo</DialogDescription>
+            <DialogDescription className="sr-only">Detalhes do produto, link de afiliado e mensagem pronta</DialogDescription>
           </DialogHeader>
-          <div className="grid gap-6 sm:grid-cols-2">
-            <div className="aspect-square overflow-hidden rounded-lg border bg-white">
-              <ProductImage item={item} className="size-full" />
+          <div className="grid gap-6 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+            <div className="grid content-start gap-4">
+              <div className="aspect-square overflow-hidden rounded-lg border bg-white">
+                <ProductImage item={item} className="size-full" />
+              </div>
+              <dl className="grid gap-3 text-sm">
+                <div>
+                  <dt className="text-muted-foreground">Preço</dt>
+                  <dd className="text-2xl font-semibold tabular-nums">{formatBRL(item.priceCents)}</dd>
+                  {item.originalPriceCents ? (
+                    <dd className="text-muted-foreground">
+                      de <s>{formatBRL(item.originalPriceCents)}</s>
+                      {item.discountPct ? <span className="ml-2 font-medium text-green-700">-{item.discountPct}%</span> : null}
+                    </dd>
+                  ) : null}
+                </div>
+                <div>
+                  <dt className="text-muted-foreground">Comissão</dt>
+                  <dd className="font-medium">{formatCommission(item.commissionCents, item.commissionPct)}</dd>
+                </div>
+                <div className="flex gap-6">
+                  <div>
+                    <dt className="text-muted-foreground">Nota</dt>
+                    <dd className="flex items-center gap-1 font-medium">
+                      {item.rating === null ? (
+                        "—"
+                      ) : (
+                        <>
+                          <StarIcon className="size-4 fill-amber-400 text-amber-400" />
+                          {item.rating.toLocaleString("pt-BR", { minimumFractionDigits: 1 })}
+                        </>
+                      )}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">Vendidos</dt>
+                    <dd className="font-medium">{formatSold(item.soldCount)}</dd>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <a href={item.productUrl} target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground underline underline-offset-4">
+                    Ver na loja
+                  </a>
+                  {favoriteButton}
+                </div>
+              </dl>
             </div>
-            <dl className="grid content-start gap-3 text-sm">
-              <div>
-                <dt className="text-muted-foreground">Preço</dt>
-                <dd className="text-2xl font-semibold tabular-nums">{formatBRL(item.priceCents)}</dd>
-                {item.originalPriceCents ? (
-                  <dd className="text-muted-foreground">
-                    de <s>{formatBRL(item.originalPriceCents)}</s>
-                    {item.discountPct ? <span className="ml-2 font-medium text-green-700">-{item.discountPct}%</span> : null}
-                  </dd>
-                ) : null}
-              </div>
-              <div>
-                <dt className="text-muted-foreground">Comissão</dt>
-                <dd className="font-medium">{formatCommission(item.commissionCents, item.commissionPct)}</dd>
-              </div>
-              <div className="flex gap-6">
-                <div>
-                  <dt className="text-muted-foreground">Nota</dt>
-                  <dd className="flex items-center gap-1 font-medium">
-                    {item.rating === null ? (
-                      "—"
-                    ) : (
-                      <>
-                        <StarIcon className="size-4 fill-amber-400 text-amber-400" />
-                        {item.rating.toLocaleString("pt-BR", { minimumFractionDigits: 1 })}
-                      </>
-                    )}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground">Vendidos</dt>
-                  <dd className="font-medium">{formatSold(item.soldCount)}</dd>
-                </div>
-              </div>
-              <a
-                href={item.productUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-sm text-muted-foreground underline underline-offset-4"
-              >
-                Ver na loja
-              </a>
-              <div className="flex items-center gap-1">
-                {promoteButton}
-                {favoriteButton}
-              </div>
-              {message ? (
-                <p className={cn("text-xs", message.ok ? "text-green-700" : "text-destructive")} role="status">
-                  {message.text}
-                </p>
-              ) : null}
-            </dl>
+            <div className="min-w-0">{open ? <CatalogShare productId={item.id} /> : null}</div>
           </div>
         </DialogContent>
       </Dialog>

@@ -1,15 +1,19 @@
-import { ComingSoon, PageHeader } from "@/components/painel/page-header";
+import type { Metadata } from "next";
+import { PageHeader } from "@/components/painel/page-header";
+import { PasteLinkForm } from "./paste-form";
 
-// Fase 4b: o cliente cola o link de um produto (Mercado Livre, Shein, ...) e o
-// sistema converte com a etiqueta de afiliado DELE.
+export const metadata: Metadata = { title: "Divulgar link — Achadinhos Bot" };
+
+// O cliente cola o endereço de um produto (Mercado Livre, Shein, Shopee ou
+// Amazon) e o sistema converte com a etiqueta de afiliado DELE.
 export default function DivulgarLinkPage() {
   return (
     <>
       <PageHeader
         title="Divulgar link"
-        description="Cole o endereço de um produto do Mercado Livre ou da Shein e o sistema converte com a sua etiqueta de afiliado."
+        description="Cole o endereço de um produto. O sistema identifica a loja, converte com a sua etiqueta de afiliado e monta a mensagem pronta."
       />
-      <ComingSoon phase="próxima atualização (fase 4b)" />
+      <PasteLinkForm />
     </>
   );
 }

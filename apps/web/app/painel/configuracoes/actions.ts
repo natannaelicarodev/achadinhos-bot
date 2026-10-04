@@ -1,49 +1,42 @@
 "use server";
 
-import { deleteStoreCredential, saveStoreCredential, type Store } from "@achadinhos/db";
+import { forTenant } from "@achadinhos/db";
+import { validateTemplate } from "@achadinhos/stores/message";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import type { FormState } from "@/lib/auth/actions";
 import { requireSession } from "@/lib/auth/current";
-import { STORE_CODES, STORES } from "@/lib/stores";
 
-const storeSchema = z.enum(STORE_CODES as [Store, ...Store[]], { message: "Escolha uma loja." });
+export type TemplateResult = { ok: true; message: string } | { ok: false; error: string };
 
-async function requireOwner() {
+const templateSchema = z.object({
+  body: z.string().max(2000),
+  headline: z.string().trim().min(1, "Informe a chamada padrão ({headline}).").max(120),
+});
+
+/** Salva o modelo de mensagem do tenant (só o dono). */
+export async function saveTemplateAction(input: { body: string; headline: string }): Promise<TemplateResult> {
   const { user } = await requireSession();
-  return user.role === "OWNER" ? user : null;
-}
+  if (user.role !== "OWNER") return { ok: false, error: "Só o dono da conta pode alterar o modelo de mensagem." };
+  const parsed = templateSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+  const errors = validateTemplate(parsed.data.body);
+  if (errors.length) return { ok: false, error: errors[0]! };
 
-export async function saveStoreCredentialAction(_prev: FormState, formData: FormData): Promise<FormState> {
-  const user = await requireOwner();
-  if (!user) return { error: "Só o dono da conta pode alterar credenciais de lojas." };
-
-  const store = storeSchema.safeParse(formData.get("store"));
-  if (!store.success) return { fieldErrors: { store: ["Escolha uma loja."] } };
-
-  const label = z.string().trim().max(60).safeParse(formData.get("label") ?? "");
-  const secrets: Record<string, string> = {};
-  const errors: Record<string, string[]> = {};
-  for (const field of STORES[store.data].fields) {
-    const value = z.string().trim().min(1).max(500).safeParse(formData.get(field.name));
-    if (value.success) secrets[field.name] = value.data;
-    else errors[field.name] = [`Informe ${field.label.toLowerCase()}.`];
-  }
-  if (Object.keys(errors).length > 0) return { fieldErrors: errors };
-
-  await saveStoreCredential(user.tenantId, {
-    store: store.data,
-    label: label.success && label.data ? label.data : null,
-    secrets,
+  const data = { body: parsed.data.body.replace(/\r\n/g, "\n"), headline: parsed.data.headline };
+  await forTenant(user.tenantId).messageTemplate.upsert({
+    where: { tenantId: user.tenantId },
+    create: { tenantId: user.tenantId, ...data },
+    update: data,
   });
   revalidatePath("/painel/configuracoes");
-  return { success: `Credenciais da ${STORES[store.data].label} salvas (criptografadas).` };
+  return { ok: true, message: "Modelo salvo. As próximas mensagens já saem com ele." };
 }
 
-export async function deleteStoreCredentialAction(formData: FormData): Promise<void> {
-  const user = await requireOwner();
-  const store = storeSchema.safeParse(formData.get("store"));
-  if (!user || !store.success) return;
-  await deleteStoreCredential(user.tenantId, store.data);
+/** Volta para o modelo padrão (apaga o personalizado). */
+export async function resetTemplateAction(): Promise<TemplateResult> {
+  const { user } = await requireSession();
+  if (user.role !== "OWNER") return { ok: false, error: "Só o dono da conta pode alterar o modelo de mensagem." };
+  await forTenant(user.tenantId).messageTemplate.deleteMany({ where: { tenantId: user.tenantId } });
   revalidatePath("/painel/configuracoes");
+  return { ok: true, message: "Modelo padrão restaurado." };
 }

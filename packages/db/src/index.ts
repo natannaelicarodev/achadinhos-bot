@@ -3,6 +3,7 @@ export { forTenant, TenantScopeError, TENANT_SCOPED_MODELS, type TenantDb } from
 export { encrypt, decrypt, parseEncryptionKey, type EncryptedPayload } from "./crypto";
 export {
   saveStoreCredential,
+  setStoreCredentialStatus,
   getStoreCredentialSecrets,
   listStoreCredentials,
   deleteStoreCredential,
@@ -38,11 +39,11 @@ export {
   deactivateCatalogProducts,
   listCatalog,
   toggleFavorite,
-  createOfferFromCatalog,
   getLatestMiningRuns,
   type MinedProduct,
   type CatalogFilters,
 } from "./catalog";
+export { saveOfferForSending, type OfferForSending } from "./offers";
 export { PrismaClient, Prisma } from "./generated/prisma/client";
 export * from "./generated/prisma/enums";
 export type {
@@ -65,4 +66,5 @@ export type {
   CatalogProduct,
   Favorite,
   CatalogMiningRun,
+  MessageTemplate,
 } from "./generated/prisma/client";
