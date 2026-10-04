@@ -2,9 +2,11 @@
 
 ## Produto
 
-SaaS multi-tenant de "achadinhos": coleta ofertas, gerencia no painel web e dispara para grupos/canais de WhatsApp (Baileys) e Telegram (grammY). Envio assíncrono via filas BullMQ (Redis).
+SaaS multi-tenant de "achadinhos": coleta ofertas, gerencia no painel web e dispara para grupos de WhatsApp (Baileys). Envio assíncrono via filas BullMQ (Redis).
 
-Status atual: **fase 2** (WhatsApp via Baileys: conexão por QR, sessão no Postgres, reconexão, grupos, envio de teste). Fase 1: contas, login, multi-tenant, painel base, credenciais de lojas criptografadas.
+**Lançamento só com WhatsApp. Telegram está FORA do escopo atual** (decisão de produto): não implementar nada de Telegram (bot, envio, tela, job, integração grammY) sem o dono do produto pedir. O que já existe fica como está e não deve ser removido: `Plan.maxTelegramBots`, `ChannelType.TELEGRAM`, a dependência `grammy` e o stub `apps/worker/src/telegram/`. No painel, a aba Telegram de Canais só registra interesse ("Quero usar o Telegram" -> `FeatureRequest`).
+
+Status atual: **fase 3** (Telegram adiado + pedido de interesse). Fase 2: WhatsApp via Baileys (conexão por QR, sessão no Postgres, reconexão, grupos, envio de teste). Fase 1: contas, login, multi-tenant, painel base, credenciais de lojas criptografadas.
 
 Planos: Iniciante (`starter`, R$ 79,90), Pro (`pro`, R$ 149,90), Agência (`agency`, R$ 297,00) — definidos em `packages/db/src/plans.ts`. Cadastro = trial de 7 dias no Iniciante; trial vencido vira `PAST_DUE` (pausa de envios: fase 9).
 
@@ -13,7 +15,7 @@ Planos: Iniciante (`starter`, R$ 79,90), Pro (`pro`, R$ 149,90), Agência (`agen
 - Node.js 24 LTS (fixado em `.nvmrc` e `engines`), pnpm 9 workspaces
 - TypeScript 6 estrito (`tsconfig.base.json` na raiz)
 - `apps/web`: Next.js 16 App Router, Tailwind CSS 4, shadcn/ui (style base-nova)
-- `apps/worker`: Node + tsx, BullMQ, ioredis, Baileys 7, grammY
+- `apps/worker`: Node + tsx, BullMQ, ioredis, Baileys 7 (grammY instalado mas sem uso: Telegram adiado)
 - `packages/db` (`@achadinhos/db`): Prisma 7 (generator `prisma-client`, adapter `@prisma/adapter-pg`), PostgreSQL
 - Validação: zod 4
 - Infra: Railway (Postgres + Redis). Dev local usa os serviços do Railway pelas URLs públicas.
@@ -71,6 +73,7 @@ cd apps/web && pnpm dlx shadcn@latest add <componente>   # novo componente shadc
 - Credenciais de lojas: só via `saveStoreCredential`/`getStoreCredentialSecrets` (AES-256-GCM, AAD = `tenantId:store`, chave `STORE_CREDENTIALS_KEY`). Nunca logar nem mandar segredo descriptografado para o cliente.
 - Auth: sessões próprias (padrão Lucia). Cookie `achadinhos_session` com token aleatório; banco guarda só SHA-256. Senha argon2id. Lógica pura recebe `PrismaClient` por parâmetro (testável); cookies/redirect só em `current.ts` e actions.
 - Testes de banco: `createTestDatabase()` de `@achadinhos/db/testing` (PGlite em processo, aplica as migrations reais).
+- Pedidos de interesse em recursos futuros: tabela `FeatureRequest` (`tenantId`, `userId`, `feature`, `createdAt`), um voto por tenant e recurso (`@@unique([tenantId, feature])`). Usar `requestFeature`/`getFeatureRequest` (`packages/db/src/feature-requests.ts`); recurso novo = novo código em `FEATURE_CODES` (sem migration). Hoje: `"telegram"`.
 - Limites do plano: `assertCanAddWhatsappNumber`, `assertChannelWithinWhatsappLimit`, `assertCanEnableGroupPosting` (`packages/db/src/limits.ts`). Checar no painel E no worker.
 
 ## WhatsApp (Baileys)

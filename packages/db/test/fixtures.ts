@@ -62,7 +62,25 @@ export async function seedTenant(prisma: PrismaClient, name: string) {
     data: { tenantId: tenant.id, channelId: channel.id, type: "pre-key", keyId: "1", ...blob },
   });
 
-  return { tenant, user, subscription, channel, group, offer, post, click, conversion, credential, waSession, waKey };
+  const featureRequest = await prisma.featureRequest.create({
+    data: { tenantId: tenant.id, userId: user.id, feature: "telegram" },
+  });
+
+  return {
+    tenant,
+    user,
+    subscription,
+    channel,
+    group,
+    offer,
+    post,
+    click,
+    conversion,
+    credential,
+    waSession,
+    waKey,
+    featureRequest,
+  };
 }
 
 export type SeededTenant = Awaited<ReturnType<typeof seedTenant>>;

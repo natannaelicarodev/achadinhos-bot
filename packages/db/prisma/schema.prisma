@@ -111,6 +111,7 @@ model Tenant {
   storeCredentials StoreCredential[]
   whatsAppSessions WhatsAppSession[]
   whatsAppKeys     WhatsAppSessionKey[]
+  featureRequests  FeatureRequest[]
 }
 
 // ---------- Auth ----------
@@ -127,8 +128,24 @@ model User {
   updatedAt           DateTime             @updatedAt
   sessions            Session[]
   passwordResetTokens PasswordResetToken[]
+  featureRequests     FeatureRequest[]
 
+  @@unique([id, tenantId]) // alvo de FK composta (FeatureRequest)
   @@index([tenantId])
+}
+
+// Pedido de interesse num recurso futuro (ex.: "telegram"). Um voto por tenant e recurso.
+model FeatureRequest {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userId    String // quem clicou
+  user      User     @relation(fields: [userId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  feature   String // código do recurso (lista em packages/db/src/feature-requests.ts)
+  createdAt DateTime @default(now())
+
+  @@unique([tenantId, feature])
+  @@index([feature, createdAt])
 }
 
 model Session {

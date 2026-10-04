@@ -1,14 +1,14 @@
-import { getWhatsappUsage, PlanLimitError } from "@achadinhos/db";
+import { getFeatureRequest, getWhatsappUsage, PlanLimitError } from "@achadinhos/db";
 import { ConnectButton } from "@/components/canais/connect-button";
+import { TelegramInterestCard } from "@/components/canais/telegram-interest-card";
 import { WhatsappChannelCard } from "@/components/canais/whatsapp-channel-card";
 import { PageHeader } from "@/components/painel/page-header";
-import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getTenantDb } from "@/lib/auth/current";
 
 export default async function CanaisPage() {
   const { db, user } = await getTenantDb();
   const isOwner = user.role === "OWNER";
-  const [channels, usage] = await Promise.all([
+  const [channels, usage, telegramRequest] = await Promise.all([
     db.channel.findMany({
       where: { type: "WHATSAPP" },
       orderBy: { createdAt: "asc" },
@@ -18,13 +18,14 @@ export default async function CanaisPage() {
       if (error instanceof PlanLimitError) return { used: 0, max: 0 };
       throw error;
     }),
+    getFeatureRequest(user.tenantId, "telegram"),
   ]);
 
   const limitReached = usage.used >= usage.max;
 
   return (
     <>
-      <PageHeader title="Canais" description="Números de WhatsApp e bots do Telegram que postam suas ofertas." />
+      <PageHeader title="Canais" description="Números de WhatsApp que postam suas ofertas." />
 
       <section className="grid gap-4">
         <div className="flex flex-wrap items-end justify-between gap-4">
@@ -67,12 +68,7 @@ export default async function CanaisPage() {
       </section>
 
       <section className="mt-10">
-        <Card>
-          <CardHeader>
-            <CardTitle>Telegram</CardTitle>
-            <CardDescription>Em breve.</CardDescription>
-          </CardHeader>
-        </Card>
+        <TelegramInterestCard requestedAt={telegramRequest?.createdAt.toISOString() ?? null} />
       </section>
     </>
   );

@@ -34,6 +34,7 @@ describe("forTenant: leitura", () => {
       dbA.storeCredential.findMany(),
       dbA.whatsAppSession.findMany(),
       dbA.whatsAppSessionKey.findMany(),
+      dbA.featureRequest.findMany(),
     ]);
     for (const rows of lists) {
       expect(rows).toHaveLength(1);
@@ -217,6 +218,7 @@ describe("exclusão de tenant", () => {
       db.prisma.storeCredential.count({ where }),
       db.prisma.whatsAppSession.count({ where }),
       db.prisma.whatsAppSessionKey.count({ where }),
+      db.prisma.featureRequest.count({ where }),
     ]);
     expect(counts.every((n) => n === 0)).toBe(true);
     expect(await db.prisma.offer.count({ where: { tenantId: b.tenant.id } })).toBe(1);
