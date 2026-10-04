@@ -1,0 +1,23 @@
+{
+  "name": "achadinhos-bot",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=24.14.0 <25",
+    "pnpm": ">=9.15.0"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "dev": "pnpm -r --parallel --filter \"./apps/*\" run dev",
+    "build": "pnpm -r run build",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm -r --if-present run test",
+    "lint": "pnpm -r --if-present run lint",
+    "db:generate": "pnpm --filter @achadinhos/db run generate",
+    "db:migrate": "pnpm --filter @achadinhos/db run migrate"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.1",
+    "typescript": "^6.0.3"
+  }
+}
