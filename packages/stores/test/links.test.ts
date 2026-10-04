@@ -5,6 +5,12 @@ import {
   extractProductInfo,
   fetchProductInfo,
   generateAffiliateLink,
+  isMercadoLivreShortLink,
+  isMercadoLivreSocialPage,
+  isOwnMercadoLivreLink,
+  mercadoLivreTagsOf,
+  readMercadoLivreSocialPage,
+  resolveMercadoLivreShortLink,
   mercadoLivreAffiliateUrl,
   MissingCredentialError,
   parseProductUrl,
@@ -116,6 +122,48 @@ describe("credenciais do cliente a partir de link colado", () => {
     expect(await readMercadoLivreAffiliateLink("https://meli.la/2Abc", { fetch })).toEqual({ mattWord: "curta", mattTool: "111" });
   });
 
+  it("Mercado Livre (caso real): meli.la -> /social/ com as etiquetas e página que se recarrega sem parar", async () => {
+    const social = "https://www.mercadolivre.com.br/social/soly123?matt_word=minhaloja&matt_tool=45678901&forceInApp=true&ref=x";
+    const { fetch, calls } = fakeFetch({
+      "https://meli.la/Ex4mpl0": () => redirect(social, 301),
+      // A página manda recarregar para ela mesma (com parâmetro novo) para sempre.
+      [social]: () => html('<meta http-equiv="refresh" content="0;url=https://www.mercadolivre.com.br/social/soly123?t=1">'),
+      "https://www.mercadolivre.com.br/social/soly123?t=1": () =>
+        html('<meta http-equiv="refresh" content="0;url=https://www.mercadolivre.com.br/social/soly123?t=2">'),
+    });
+    expect(await readMercadoLivreAffiliateLink("https://meli.la/Ex4mpl0", { fetch })).toEqual({
+      mattWord: "minhaloja",
+      mattTool: "45678901",
+    });
+    // Parou ao ver as etiquetas: nem abriu a página /social/.
+    expect(calls.map((c) => c.url)).toEqual(["https://meli.la/Ex4mpl0"]);
+  });
+
+  it("página normal de loja não tem meta refresh seguido; redirecionamento em círculo para sem erro", async () => {
+    const product = "https://produto.mercadolivre.com.br/MLB-123456789-x";
+    const refreshing = fakeFetch({
+      [product]: () => html(`<meta http-equiv="refresh" content="0;url=${product}?again=1">`),
+    });
+    expect((await resolveStoreUrl(product, { fetch: refreshing.fetch })).map(String)).toEqual([product]);
+
+    const loop = fakeFetch({
+      "https://meli.la/a": () => redirect("https://meli.la/b"),
+      "https://meli.la/b": () => redirect("https://meli.la/a"),
+    });
+    expect((await resolveStoreUrl("https://meli.la/a", { fetch: loop.fetch })).map(String)).toEqual([
+      "https://meli.la/a",
+      "https://meli.la/b",
+    ]);
+  });
+
+  it("Divulgar link: para ao chegar na página do produto (stopWhen)", async () => {
+    const productUrl = "https://produto.mercadolivre.com.br/MLB-987654321-air-fryer";
+    const { fetch, calls } = fakeFetch({ "https://meli.la/xyz": () => redirect(productUrl) });
+    const chain = await resolveStoreUrl("https://meli.la/xyz", { fetch, stopWhen: (u) => parseProductUrl(u) !== null });
+    expect(parseProductUrl(chain.at(-1)!)?.externalId).toBe("MLB987654321");
+    expect(calls).toHaveLength(1);
+  });
+
   it("Mercado Livre: link sem etiqueta ou de outra loja dá erro em pt-BR", async () => {
     const { fetch } = fakeFetch({ "https://produto.mercadolivre.com.br/MLB-1-x": () => html("<html></html>") });
     await expect(readMercadoLivreAffiliateLink("https://produto.mercadolivre.com.br/MLB-1-x", { fetch })).rejects.toThrow(
@@ -135,6 +183,65 @@ describe("credenciais do cliente a partir de link colado", () => {
     });
     expect(await readSheinAffiliateId("https://onelink.shein.com/3/xyz", { fetch })).toEqual({ affiliateId: "7654321" });
     await expect(readSheinAffiliateId("abc")).rejects.toThrow("Shein");
+  });
+});
+
+describe("Mercado Livre: meli.la do portal (página social com ref)", () => {
+  const SHORT = "https://meli.la/Ex4mpl0";
+  const SOCIAL =
+    "https://www.mercadolivre.com.br/social/soly123?matt_word=minhaloja&matt_tool=45678901&forceInApp=true&ref=TOKEN200";
+  const SOCIAL_HTML = `<head>
+    <meta property="og:title" content="Principia, Sérum Facial Retinol, 30ml">
+    <meta property="og:image" content="https://http2.mlstatic.com/D_NQ_serum.jpg">
+    <meta property="og:url" content="https://www.mercadolivre.com.br/social/soly123">
+  </head><body>
+    <a href="https://www.mercadolivre.com.br/c/livros-revistas-e-comics">Livros</a>
+    <a href="https://www.mercadolivre.com.br/principia-serum-facial-retinol-30ml/p/MLB19132085?pdp_filters=x&amp;matt_tracing_id=abc">Ver</a>
+    <script type="application/ld+json">{"@type":"Product","name":"Principia, Sérum Facial Retinol, 30ml","offers":{"price":"69.90"}}</script>
+  </body>`;
+
+  it("resolve o meli.la parando na página social que já tem as etiquetas", async () => {
+    const { fetch, calls } = fakeFetch({ [SHORT]: () => redirect(SOCIAL, 301) });
+    const { tags, landing } = await resolveMercadoLivreShortLink(SHORT, { fetch });
+    expect(tags).toEqual({ mattWord: "minhaloja", mattTool: "45678901" });
+    expect(landing.pathname).toBe("/social/soly123");
+    expect(calls).toHaveLength(1);
+  });
+
+  it("é do cliente só se Etiqueta E ID da Ferramenta baterem", () => {
+    const tags = mercadoLivreTagsOf(new URL(SOCIAL));
+    expect(isOwnMercadoLivreLink(tags, { mattWord: "minhaloja", mattTool: "45678901" })).toBe(true);
+    expect(isOwnMercadoLivreLink(tags, { mattWord: "minhaloja", mattTool: "999" })).toBe(false);
+    expect(isOwnMercadoLivreLink(tags, { mattWord: "outra", mattTool: "45678901" })).toBe(false);
+    expect(isOwnMercadoLivreLink(tags, null)).toBe(false);
+    expect(isOwnMercadoLivreLink(null, { mattWord: "minhaloja", mattTool: "45678901" })).toBe(false);
+  });
+
+  it("lê título, preço e imagem da página social e acha o produto recomendado", async () => {
+    const { fetch } = fakeFetch({ [SOCIAL]: () => html(SOCIAL_HTML) });
+    const { info, product } = await readMercadoLivreSocialPage(new URL(SOCIAL), { fetch });
+    expect(info).toMatchObject({
+      title: "Principia, Sérum Facial Retinol, 30ml",
+      imageUrl: "https://http2.mlstatic.com/D_NQ_serum.jpg",
+      priceCents: 6990,
+    });
+    expect(product).toEqual({
+      store: "MERCADO_LIVRE",
+      externalId: "MLB19132085",
+      productUrl: "https://www.mercadolivre.com.br/principia-serum-facial-retinol-30ml/p/MLB19132085",
+    });
+    expect(isMercadoLivreShortLink(new URL(SHORT))).toBe(true);
+    expect(isMercadoLivreSocialPage(new URL(SOCIAL))).toBe(true);
+  });
+
+  it("link de outra pessoa: o produto achado é convertido com as etiquetas DO CLIENTE (troca, não soma)", async () => {
+    const { fetch } = fakeFetch({ [SOCIAL]: () => html(SOCIAL_HTML) });
+    const { product } = await readMercadoLivreSocialPage(new URL(SOCIAL), { fetch });
+    const link = await generateAffiliateLink("t1", product!, { getSecrets: async () => ({ mattWord: "cliente", mattTool: "111" }) });
+    const url = new URL(link);
+    expect(url.searchParams.get("matt_word")).toBe("cliente");
+    expect(url.searchParams.get("matt_tool")).toBe("111");
+    expect(link).not.toContain("minhaloja");
   });
 });
 

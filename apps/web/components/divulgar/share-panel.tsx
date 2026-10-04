@@ -49,6 +49,11 @@ export function SharePanel({ preview, editableInfo }: { preview: SharePreview; e
       {/* Link de afiliado */}
       <section className="grid gap-2">
         <Label>Seu link de afiliado</Label>
+        {preview.notice ? (
+          <p className={preview.shortLink ? "text-xs text-green-700" : "text-xs text-amber-700 dark:text-amber-400"}>
+            {preview.notice}
+          </p>
+        ) : null}
         {link ? (
           <div className="flex gap-2">
             <Input readOnly value={link} className="font-mono text-xs" onFocus={(e) => e.currentTarget.select()} />
@@ -159,6 +164,7 @@ export function SharePanel({ preview, editableInfo }: { preview: SharePreview; e
               const result = await sendToGroupsAction({
                 productUrl: preview.product.productUrl,
                 catalogProductId: preview.catalogProductId,
+                shortLink: preview.shortLink,
                 headline,
                 title,
                 priceCents,

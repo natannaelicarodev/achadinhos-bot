@@ -1,12 +1,19 @@
 "use server";
 
-import { forTenant, saveOfferForSending } from "@achadinhos/db";
+import { forTenant, getStoreCredentialSecrets, saveOfferForSending } from "@achadinhos/db";
 import {
+  isMercadoLivreShortLink,
+  isMercadoLivreSocialPage,
+  isOwnMercadoLivreLink,
+  mercadoLivreSecretsSchema,
   parseHttpsUrl,
   parseProductUrl,
+  readMercadoLivreSocialPage,
+  resolveMercadoLivreShortLink,
   resolveStoreUrl,
   StoreUrlError,
   type AffiliateStore,
+  type MercadoLivreSecrets,
   type PageProductInfo,
   type ProductRef,
 } from "@achadinhos/stores";
@@ -18,6 +25,7 @@ import {
   composeMessage,
   getMessageSettings,
   readProductInfo,
+  type LinkResult,
   type MessageSettings,
 } from "@/lib/affiliate-server";
 
@@ -30,23 +38,110 @@ export interface SharePreview {
   link: string | null;
   linkError: string | null;
   missingCredential: AffiliateStore | null;
+  /** meli.la do próprio cliente, usado como está (mantém a página "recomenda" do ML). */
+  shortLink: string | null;
+  /** Aviso em pt-BR mostrado acima do link. */
+  notice: string | null;
   settings: MessageSettings;
 }
 
 export type PreviewResult = { ok: true; preview: SharePreview } | { ok: false; error: string };
 
+const ML_PREFER_SHORT_LINK =
+  "Para garantir que a venda conte para você, prefira colar o link meli.la gerado no seu portal de afiliados do Mercado Livre.";
+const ML_OWN_SHORT_LINK = "Usando o seu link meli.la: quem clicar vê a página do Mercado Livre com a sua recomendação.";
+
+async function tenantMercadoLivreTags(tenantId: string): Promise<MercadoLivreSecrets | null> {
+  const parsed = mercadoLivreSecretsSchema.safeParse(await getStoreCredentialSecrets(tenantId, "MERCADO_LIVRE"));
+  return parsed.success ? parsed.data : null;
+}
+
+/** meli.la sem parâmetros (o que vai na mensagem). */
+const canonicalShortLink = (url: URL) => `https://${url.hostname}${url.pathname}`;
+
+/** Produto do meli.la quando a página social não mostra o anúncio: identificado pelo próprio link curto. */
+function shortLinkProductRef(shortLink: URL, landing: URL): ProductRef {
+  return {
+    store: "MERCADO_LIVRE",
+    externalId: `meli.la${shortLink.pathname}`.slice(0, 100),
+    productUrl: `${landing.origin}${landing.pathname}`,
+  };
+}
+
+function buildPreview(
+  base: Pick<SharePreview, "product" | "catalogProductId" | "settings"> & Partial<Pick<SharePreview, "shortLink" | "notice">>,
+  info: (PageProductInfo & { discountPct?: number | null }) | null,
+  link: LinkResult,
+  needsManualInfo: boolean,
+): SharePreview {
+  return {
+    ...base,
+    shortLink: base.shortLink ?? null,
+    notice: base.notice ?? null,
+    info: {
+      title: info?.title ?? null,
+      imageUrl: info?.imageUrl ?? null,
+      priceCents: info?.priceCents ?? null,
+      originalPriceCents: info?.originalPriceCents ?? null,
+      discountPct: info?.discountPct ?? null,
+    },
+    needsManualInfo,
+    link: link.ok ? link.link : null,
+    linkError: link.ok ? null : link.error,
+    missingCredential: link.ok ? null : (link.missingCredential ?? null),
+  };
+}
+
+/** meli.la colado: do próprio cliente -> usa como está; de outra pessoa -> converte o produto. */
+async function previewMercadoLivreShortLink(tenantId: string, shortLink: URL): Promise<PreviewResult> {
+  const { tags, landing } = await resolveMercadoLivreShortLink(shortLink.toString());
+  const [own, settings] = await Promise.all([tenantMercadoLivreTags(tenantId), getMessageSettings(tenantId)]);
+
+  let product = parseProductUrl(landing);
+  let info: PageProductInfo | null = null;
+  if (product) info = await readProductInfo(product);
+  else if (isMercadoLivreSocialPage(landing)) ({ info, product } = await readMercadoLivreSocialPage(landing));
+  const needsManualInfo = !info?.title || !info.priceCents;
+
+  if (isOwnMercadoLivreLink(tags, own)) {
+    const link = canonicalShortLink(shortLink);
+    return {
+      ok: true,
+      preview: buildPreview(
+        {
+          product: product ?? shortLinkProductRef(shortLink, landing),
+          catalogProductId: null,
+          settings,
+          shortLink: link,
+          notice: ML_OWN_SHORT_LINK,
+        },
+        info,
+        { ok: true, link },
+        needsManualInfo,
+      ),
+    };
+  }
+  if (!product) {
+    return { ok: false, error: "Não encontrei o produto nesse link. Abra o produto no Mercado Livre e cole o endereço da página dele." };
+  }
+  const link = await affiliateLinkFor(tenantId, product);
+  return { ok: true, preview: buildPreview({ product, catalogProductId: null, settings }, info, link, needsManualInfo) };
+}
+
 /** "Divulgar link": identifica a loja, converte com a credencial do cliente e lê os dados do produto. */
 export async function previewPastedLinkAction(rawUrl: string): Promise<PreviewResult> {
   const { user } = await requireSession();
   const input = z.string().trim().min(8).max(2048).safeParse(rawUrl);
-  if (!input.success || !parseHttpsUrl(input.data)) return { ok: false, error: "Cole um endereço válido (começando com https://)." };
+  const first = input.success ? parseHttpsUrl(input.data) : null;
+  if (!first) return { ok: false, error: "Cole um endereço válido (começando com https://)." };
 
   let product: ProductRef | null = null;
   try {
-    const first = parseHttpsUrl(input.data)!;
+    if (isMercadoLivreShortLink(first)) return await previewMercadoLivreShortLink(user.tenantId, first);
     product = parseProductUrl(first);
     if (!product) {
-      const chain = await resolveStoreUrl(input.data);
+      // Segue o link curto só até chegar numa página de produto.
+      const chain = await resolveStoreUrl(first.toString(), { stopWhen: (url) => parseProductUrl(url) !== null });
       product = chain.map(parseProductUrl).findLast((p) => p !== null) ?? null;
     }
   } catch (error) {
@@ -64,22 +159,17 @@ export async function previewPastedLinkAction(rawUrl: string): Promise<PreviewRe
   ]);
   return {
     ok: true,
-    preview: {
-      product,
-      catalogProductId: null,
-      info: {
-        title: info?.title ?? null,
-        imageUrl: info?.imageUrl ?? null,
-        priceCents: info?.priceCents ?? null,
-        originalPriceCents: info?.originalPriceCents ?? null,
-        discountPct: null,
+    preview: buildPreview(
+      {
+        product,
+        catalogProductId: null,
+        settings,
+        notice: product.store === "MERCADO_LIVRE" ? ML_PREFER_SHORT_LINK : null,
       },
-      needsManualInfo: !info?.title || !info.priceCents,
-      link: link.ok ? link.link : null,
-      linkError: link.ok ? null : link.error,
-      missingCredential: link.ok ? null : (link.missingCredential ?? null),
-      settings,
-    },
+      info,
+      link,
+      !info?.title || !info.priceCents,
+    ),
   };
 }
 
@@ -95,28 +185,25 @@ export async function previewCatalogProductAction(catalogProductId: string): Pro
   const [link, settings] = await Promise.all([affiliateLinkFor(user.tenantId, product), getMessageSettings(user.tenantId)]);
   return {
     ok: true,
-    preview: {
-      product,
-      catalogProductId: row.id,
-      info: {
+    preview: buildPreview(
+      { product, catalogProductId: row.id, settings },
+      {
         title: row.title,
         imageUrl: row.imageUrl,
         priceCents: row.priceCents,
         originalPriceCents: row.originalPriceCents,
         discountPct: row.discountPct,
       },
-      needsManualInfo: false,
-      link: link.ok ? link.link : null,
-      linkError: link.ok ? null : link.error,
-      missingCredential: link.ok ? null : (link.missingCredential ?? null),
-      settings,
-    },
+      link,
+      false,
+    ),
   };
 }
 
 const sendSchema = z.object({
   productUrl: z.string().url().max(2048),
   catalogProductId: z.string().min(1).max(100).nullable(),
+  shortLink: z.string().url().max(300).nullable(),
   headline: z.string().trim().max(120),
   title: z.string().trim().min(2, "Informe o título do produto.").max(300),
   priceCents: z.number().int().positive("Informe o preço.").max(100_000_000),
@@ -137,32 +224,52 @@ export async function sendToGroupsAction(input: z.input<typeof sendSchema>): Pro
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
   const data = parsed.data;
 
-  const url = parseHttpsUrl(data.productUrl);
-  const product = url ? parseProductUrl(url) : null;
-  if (!product) return { ok: false, error: "Produto inválido." };
-  if (data.catalogProductId) {
-    const row = await forTenant(user.tenantId).catalogProduct.findUnique({ where: { id: data.catalogProductId } });
-    if (!row || row.productUrl !== product.productUrl) return { ok: false, error: "Produto do catálogo não encontrado." };
+  let product: ProductRef | null;
+  let affiliateUrl: string;
+  const short = data.shortLink ? parseHttpsUrl(data.shortLink) : null;
+  if (short) {
+    // meli.la do cliente: confere de novo que é dele antes de usar como está.
+    if (!isMercadoLivreShortLink(short)) return { ok: false, error: "Link inválido." };
+    try {
+      const { tags, landing } = await resolveMercadoLivreShortLink(short.toString());
+      if (!isOwnMercadoLivreLink(tags, await tenantMercadoLivreTags(user.tenantId))) {
+        return { ok: false, error: "Este link meli.la não é da sua conta de afiliado." };
+      }
+      const url = parseHttpsUrl(data.productUrl);
+      product = (url && parseProductUrl(url)) || shortLinkProductRef(short, landing);
+      affiliateUrl = canonicalShortLink(short);
+    } catch (error) {
+      if (error instanceof StoreUrlError) return { ok: false, error: error.message };
+      throw error;
+    }
+  } else {
+    const url = parseHttpsUrl(data.productUrl);
+    product = url ? parseProductUrl(url) : null;
+    if (!product) return { ok: false, error: "Produto inválido." };
+    if (data.catalogProductId) {
+      const row = await forTenant(user.tenantId).catalogProduct.findUnique({ where: { id: data.catalogProductId } });
+      if (!row || row.productUrl !== product.productUrl) return { ok: false, error: "Produto do catálogo não encontrado." };
+    }
+    const link = await affiliateLinkFor(user.tenantId, product);
+    if (!link.ok) return { ok: false, error: link.error };
+    affiliateUrl = link.link;
   }
-
-  const link = await affiliateLinkFor(user.tenantId, product);
-  if (!link.ok) return { ok: false, error: link.error };
 
   const settings = await getMessageSettings(user.tenantId);
   const originalPriceCents = data.originalPriceCents && data.originalPriceCents > data.priceCents ? data.originalPriceCents : null;
   const text = composeMessage(
     settings,
     { title: data.title, priceCents: data.priceCents, originalPriceCents, discountPct: null },
-    link.link,
+    affiliateUrl,
     data.headline || settings.headline,
   );
   await saveOfferForSending(user.tenantId, {
-    catalogProductId: data.catalogProductId,
+    catalogProductId: short ? null : data.catalogProductId,
     store: product.store,
     externalId: product.externalId,
     title: data.title,
     url: product.productUrl,
-    affiliateUrl: link.link,
+    affiliateUrl,
     imageUrl: data.imageUrl,
     priceCents: data.priceCents,
     originalPriceCents,

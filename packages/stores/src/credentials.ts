@@ -57,8 +57,9 @@ export async function readMercadoLivreAffiliateLink(raw: string, options: FetchO
   if (!first || storeOfHost(first.hostname) !== "MERCADO_LIVRE") {
     throw new StoreUrlError("Cole um link de afiliado do Mercado Livre (meli.la/... ou mercadolivre.com.br/...).");
   }
-  // Link completo já tem os parâmetros; link curto precisa seguir o redirecionamento.
-  const chain = first.searchParams.has("matt_tool") ? [first] : await resolveStoreUrl(raw, options);
+  // Link completo já tem os parâmetros; link curto: segue só até aparecerem.
+  const hasTags = (url: URL) => url.searchParams.has("matt_word") && url.searchParams.has("matt_tool");
+  const chain = hasTags(first) ? [first] : await resolveStoreUrl(raw, { ...options, stopWhen: hasTags });
   for (const url of [...chain].reverse()) {
     const mattWord = url.searchParams.get("matt_word");
     const mattTool = url.searchParams.get("matt_tool");
@@ -67,6 +68,30 @@ export async function readMercadoLivreAffiliateLink(raw: string, options: FetchO
   throw new StoreUrlError(
     "Não encontrei a Etiqueta (matt_word) e o ID da Ferramenta (matt_tool) nesse link. Gere o link no portal de afiliados do Mercado Livre e cole de novo.",
   );
+}
+
+/** Etiquetas do Mercado Livre presentes numa URL (ou null). */
+export function mercadoLivreTagsOf(url: URL): MercadoLivreSecrets | null {
+  const parsed = mercadoLivreSecretsSchema.safeParse({
+    mattWord: url.searchParams.get("matt_word") ?? "",
+    mattTool: url.searchParams.get("matt_tool") ?? "",
+  });
+  return parsed.success ? parsed.data : null;
+}
+
+/**
+ * Segue um meli.la até a página de destino (para ao achar as etiquetas).
+ * `tags`: de quem é o link; `landing`: página social ou de produto.
+ */
+export async function resolveMercadoLivreShortLink(raw: string, options: FetchOptions = {}) {
+  const chain = await resolveStoreUrl(raw, { ...options, stopWhen: (url) => mercadoLivreTagsOf(url) !== null });
+  const landing = chain.at(-1)!;
+  return { tags: mercadoLivreTagsOf(landing), landing };
+}
+
+/** true se o link é do próprio cliente (mesma Etiqueta e mesmo ID da Ferramenta). */
+export function isOwnMercadoLivreLink(tags: MercadoLivreSecrets | null, secrets: MercadoLivreSecrets | null): boolean {
+  return Boolean(tags && secrets && tags.mattTool === secrets.mattTool && tags.mattWord === secrets.mattWord);
 }
 
 const SHEIN_ID = /affiliate_koc_(\d{4,20})/;
@@ -79,8 +104,8 @@ export async function readSheinAffiliateId(raw: string, options: FetchOptions = 
   if (!first || storeOfHost(first.hostname) !== "SHEIN") {
     throw new StoreUrlError("Cole um link de afiliado da Shein (onelink.shein.com ou br.shein.com) ou digite o ID.");
   }
-  const direct = first.searchParams.get("url_from")?.match(SHEIN_ID);
-  const chain = direct ? [first] : await resolveStoreUrl(value, options);
+  const hasId = (url: URL) => SHEIN_ID.test(url.searchParams.get("url_from") ?? "");
+  const chain = hasId(first) ? [first] : await resolveStoreUrl(value, { ...options, stopWhen: hasId });
   for (const url of [...chain].reverse()) {
     const id = url.searchParams.get("url_from")?.match(SHEIN_ID)?.[1] ?? url.toString().match(SHEIN_ID)?.[1];
     if (id) return sheinSecretsSchema.parse({ affiliateId: id });

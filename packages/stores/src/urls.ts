@@ -39,6 +39,11 @@ export interface FetchOptions {
   timeoutMs?: number;
 }
 
+export interface ResolveOptions extends FetchOptions {
+  /** Para assim que uma URL da cadeia já tiver o que se procura (sem abrir mais páginas). */
+  stopWhen?: (url: URL) => boolean;
+}
+
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
 
@@ -57,6 +62,20 @@ async function readLimitedText(response: Response, maxBytes: number): Promise<st
   return Buffer.concat(chunks).toString("utf8");
 }
 
+/** Encurtadores/links de redirecionamento das lojas (os únicos onde seguimos meta refresh). */
+function isShortener(url: URL): boolean {
+  const host = url.hostname.toLowerCase();
+  return (
+    host === "meli.la" ||
+    (host === "mercadolivre.com" && url.pathname.startsWith("/sec/")) ||
+    host === "amzn.to" ||
+    host === "a.co" ||
+    host === "onelink.shein.com" ||
+    host === "shope.ee" ||
+    host === "s.shopee.com.br"
+  );
+}
+
 function metaRefreshTarget(html: string): string | null {
   const match = html.match(/<meta[^>]+http-equiv=["']?refresh["']?[^>]*content=["'][^"']*url=([^"'>\s]+)/i);
   return match?.[1] ? decodeEntities(match[1]) : null;
@@ -64,12 +83,16 @@ function metaRefreshTarget(html: string): string | null {
 
 /**
  * Segue redirecionamentos (HTTP 3xx e meta refresh) só entre domínios das
- * lojas. Devolve todas as URLs visitadas (a última é o destino).
+ * lojas. Devolve todas as URLs visitadas (a última é o destino). Para cedo
+ * com `stopWhen`; se a loja mandar de volta para um endereço já visitado
+ * (ex.: página que se recarrega), para ali em vez de andar em círculo.
  */
-export async function resolveStoreUrl(raw: string, options: FetchOptions = {}): Promise<URL[]> {
-  let url = parseHttpsUrl(raw);
-  if (!url) throw new StoreUrlError("Cole um endereço válido (começando com https://).");
+export async function resolveStoreUrl(raw: string, options: ResolveOptions = {}): Promise<URL[]> {
+  const start = parseHttpsUrl(raw);
+  if (!start) throw new StoreUrlError("Cole um endereço válido (começando com https://).");
+  let url: URL = start;
   const chain: URL[] = [];
+  const visited = new Set<string>();
   const signal = AbortSignal.timeout(options.timeoutMs ?? 10_000);
   const http = options.fetch ?? fetch;
 
@@ -78,6 +101,8 @@ export async function resolveStoreUrl(raw: string, options: FetchOptions = {}): 
       throw new StoreUrlError("Este endereço não é de uma loja suportada (Shopee, Mercado Livre, Amazon ou Shein).");
     }
     chain.push(url);
+    visited.add(url.toString());
+    if (options.stopWhen?.(url)) return chain;
     let response: Response;
     try {
       response = await http(url, { redirect: "manual", signal, headers: { "user-agent": USER_AGENT, accept: "text/html" } });
@@ -89,17 +114,18 @@ export async function resolveStoreUrl(raw: string, options: FetchOptions = {}): 
       await response.body?.cancel().catch(() => undefined);
       const next = parseHttpsUrl(new URL(location, url).toString());
       if (!next) throw new StoreUrlError("O link redireciona para um endereço inválido.");
+      if (visited.has(next.toString())) return chain; // círculo: fica com o que já tem
       url = next;
       continue;
     }
+    // Meta refresh só é seguido a partir de encurtador: páginas normais das
+    // lojas às vezes "se recarregam" sem parar (ex.: Mercado Livre /social/).
     const type = response.headers.get("content-type") ?? "";
-    const refresh = type.includes("html") ? metaRefreshTarget(await readLimitedText(response, 200_000)) : null;
-    if (!refresh) {
-      await response.body?.cancel().catch(() => undefined);
-      return chain;
-    }
-    const next = parseHttpsUrl(new URL(refresh, url).toString());
-    if (!next) return chain;
+    const refresh =
+      isShortener(url) && type.includes("html") ? metaRefreshTarget(await readLimitedText(response, 200_000)) : null;
+    await response.body?.cancel().catch(() => undefined);
+    const next = refresh ? parseHttpsUrl(new URL(refresh, url).toString()) : null;
+    if (!next || visited.has(next.toString())) return chain;
     url = next;
   }
   throw new StoreUrlError("O link redireciona vezes demais.");
@@ -227,9 +253,9 @@ export function extractProductInfo(html: string): PageProductInfo {
   };
 }
 
-/** Baixa a página do produto (só domínios das lojas, até 2 MB) e extrai os dados. */
-export async function fetchProductInfo(productUrl: string, options: FetchOptions = {}): Promise<PageProductInfo | null> {
-  const url = parseHttpsUrl(productUrl);
+/** HTML de uma página de loja (só domínios das lojas, até 2 MB). null se falhar. */
+export async function fetchStorePage(pageUrl: string, options: FetchOptions = {}): Promise<string | null> {
+  const url = parseHttpsUrl(pageUrl);
   if (!url || !storeOfHost(url.hostname)) return null;
   try {
     const response = await (options.fetch ?? fetch)(url, {
@@ -237,9 +263,51 @@ export async function fetchProductInfo(productUrl: string, options: FetchOptions
       headers: { "user-agent": USER_AGENT, accept: "text/html", "accept-language": "pt-BR,pt;q=0.9" },
     });
     if (!response.ok) return null;
-    const info = extractProductInfo(await readLimitedText(response, 2_000_000));
-    return info.title || info.priceCents || info.imageUrl ? info : null;
+    return await readLimitedText(response, 2_000_000);
   } catch {
     return null;
   }
+}
+
+const hasInfo = (info: PageProductInfo) => Boolean(info.title || info.priceCents || info.imageUrl);
+
+/** Baixa a página do produto e extrai título, preço e imagem. */
+export async function fetchProductInfo(productUrl: string, options: FetchOptions = {}): Promise<PageProductInfo | null> {
+  const html = await fetchStorePage(productUrl, options);
+  if (!html) return null;
+  const info = extractProductInfo(html);
+  return hasInfo(info) ? info : null;
+}
+
+// ---------- Mercado Livre: link meli.la (página "social") ----------
+
+/** meli.la e mercadolivre.com/sec: links curtos gerados no portal de afiliados. */
+export function isMercadoLivreShortLink(url: URL): boolean {
+  const host = url.hostname.toLowerCase();
+  return host === "meli.la" || (host === "mercadolivre.com" && url.pathname.startsWith("/sec/"));
+}
+
+/** Página "social" do Mercado Livre: produto recomendado pelo afiliado (destino do meli.la). */
+export function isMercadoLivreSocialPage(url: URL): boolean {
+  return storeOfHost(url.hostname) === "MERCADO_LIVRE" && url.pathname.startsWith("/social/");
+}
+
+/**
+ * Lê a página social do meli.la: título/preço/imagem do produto recomendado e
+ * o endereço do produto (para converter quando o link for de outra pessoa).
+ */
+export async function readMercadoLivreSocialPage(
+  socialUrl: URL,
+  options: FetchOptions = {},
+): Promise<{ info: PageProductInfo | null; product: ProductRef | null }> {
+  const html = await fetchStorePage(socialUrl.toString(), options);
+  if (!html) return { info: null, product: null };
+  const info = extractProductInfo(html);
+  let product: ProductRef | null = null;
+  for (const [raw] of html.matchAll(/https:\/\/(?:www|produto)\.mercadolivre\.com\.br\/[^"'\s<>\\]*MLB-?\d{6,}[^"'\s<>\\]*/g)) {
+    const url = parseHttpsUrl(decodeEntities(raw));
+    product = url ? parseProductUrl(url) : null;
+    if (product) break;
+  }
+  return { info: hasInfo(info) ? info : null, product };
 }
