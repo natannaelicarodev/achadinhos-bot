@@ -8,9 +8,12 @@ if (existsSync(rootEnv)) process.loadEnvFile(rootEnv);
 
 export default defineConfig({
   schema: "prisma/schema.prisma",
-  migrations: { path: "prisma/migrations" },
+  migrations: {
+    path: "prisma/migrations",
+    seed: "tsx prisma/seed.ts",
+  },
   datasource: {
-    // `prisma generate` não precisa de conexão; migrate precisa de DATABASE_URL.
+    // `prisma generate` não precisa de conexão; migrate/seed precisam de DATABASE_URL.
     url: process.env.DATABASE_URL ?? "",
   },
 });

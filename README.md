@@ -2,7 +2,7 @@
 
 Bot de achadinhos/ofertas com painel web (Next.js) e worker (filas BullMQ, WhatsApp via Baileys, Telegram via grammY).
 
-> **Status:** fase 0 — só o esqueleto do projeto. Sem funcionalidades ainda.
+> **Status:** fase 1 — contas, login, multi-tenant e painel base.
 
 ## Estrutura
 
@@ -70,7 +70,15 @@ cd achadinhos-bot
 copy .env.example .env
 ```
 
-Abra o `.env` e cole as URLs do passo 4 em `DATABASE_URL` e `REDIS_URL`.
+Abra o `.env` e:
+
+1. Cole as URLs do passo 4 em `DATABASE_URL` e `REDIS_URL`.
+2. Gere a chave de criptografia das credenciais de lojas e cole em `STORE_CREDENTIALS_KEY`:
+   ```powershell
+   node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+   ```
+   Guarde essa chave: sem ela, as credenciais salvas não abrem mais.
+3. E-mail: deixe `SMTP_HOST` vazio no dev — o link de "esqueci minha senha" aparece no terminal.
 
 ### 6. Instalar dependências
 
@@ -82,17 +90,14 @@ Isso também roda `prisma generate` automaticamente.
 
 ### 7. Banco de dados
 
-Na fase 0 ainda não há models, então **não** há migration. Para gerar o client manualmente:
+Aplique as migrations e cadastre os planos (Iniciante, Pro, Agência):
 
 ```powershell
-pnpm db:generate
+pnpm db:deploy
+pnpm db:seed
 ```
 
-A partir da fase 1 (quando houver models):
-
-```powershell
-pnpm db:migrate
-```
+Rode os dois de novo sempre que puxar uma fase nova. Os dois podem rodar mais de uma vez sem problema.
 
 ### 8. Rodar em desenvolvimento
 
@@ -102,7 +107,7 @@ pnpm dev
 
 Sobe `web` e `worker` em paralelo:
 
-- Web: http://localhost:3000 (rota de teste: http://localhost:3000/api/health)
+- Web: http://localhost:3000 (crie uma conta em http://localhost:3000/cadastro)
 - Worker: logs no terminal (`[worker] iniciado ...`)
 
 Para parar: `Ctrl + C`.
@@ -114,6 +119,9 @@ Para parar: `Ctrl + C`.
 | `pnpm dev`           | web + worker em modo desenvolvimento           |
 | `pnpm build`         | build de todos os pacotes                      |
 | `pnpm typecheck`     | checagem de tipos em todos os pacotes          |
-| `pnpm test`          | testes (quando existirem)                      |
+| `pnpm test`          | testes (banco em memória, não usa o Railway)   |
 | `pnpm db:generate`   | gera o Prisma Client                           |
-| `pnpm db:migrate`    | cria/aplica migrations (a partir da fase 1)    |
+| `pnpm db:deploy`     | aplica migrations pendentes                    |
+| `pnpm db:seed`       | cadastra/atualiza os planos                    |
+| `pnpm db:migrate`    | cria migration nova a partir do schema (dev)   |
+| `pnpm db:studio`     | abre o Prisma Studio para ver os dados         |

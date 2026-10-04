@@ -4,22 +4,30 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./testing": "./src/testing.ts"
   },
   "scripts": {
     "generate": "prisma generate",
     "migrate": "prisma migrate dev",
     "migrate:deploy": "prisma migrate deploy",
+    "seed": "prisma db seed",
     "studio": "prisma studio",
     "build": "prisma generate && tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
     "postinstall": "prisma generate"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.0",
-    "@prisma/client": "^7.10.0"
+    "@prisma/client": "^7.10.0",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
-    "prisma": "^7.10.0"
+    "@electric-sql/pglite": "^0.5.8",
+    "pglite-prisma-adapter": "^0.7.2",
+    "prisma": "^7.10.0",
+    "tsx": "^4.23.15",
+    "vitest": "^5.0.3"
   }
 }
