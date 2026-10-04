@@ -65,6 +65,20 @@ export async function seedTenant(prisma: PrismaClient, name: string) {
   const featureRequest = await prisma.featureRequest.create({
     data: { tenantId: tenant.id, userId: user.id, feature: "telegram" },
   });
+  const catalogProduct = await prisma.catalogProduct.create({
+    data: {
+      store: "SHOPEE",
+      externalId: `cat-${slug}`,
+      title: `Produto ${name}`,
+      searchText: `produto ${slug}`,
+      productUrl: `https://shopee.com.br/product/1/${slug}`,
+      priceCents: 1000,
+      lastSeenAt: new Date(),
+    },
+  });
+  const favorite = await prisma.favorite.create({
+    data: { tenantId: tenant.id, catalogProductId: catalogProduct.id },
+  });
 
   return {
     tenant,
@@ -80,6 +94,8 @@ export async function seedTenant(prisma: PrismaClient, name: string) {
     waSession,
     waKey,
     featureRequest,
+    catalogProduct,
+    favorite,
   };
 }
 

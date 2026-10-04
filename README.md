@@ -2,7 +2,7 @@
 
 Bot de achadinhos/ofertas com painel web (Next.js) e worker (filas BullMQ, WhatsApp via Baileys).
 
-> **Status:** fase 3 — lançamento só com WhatsApp; Telegram adiado (o painel registra pedidos de interesse).
+> **Status:** fase 4a — catálogo central de produtos minerado nas lojas (Shopee), com página Catálogo no painel. Lançamento só com WhatsApp.
 
 ## Estrutura
 

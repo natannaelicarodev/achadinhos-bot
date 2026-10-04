@@ -112,6 +112,7 @@ model Tenant {
   whatsAppSessions WhatsAppSession[]
   whatsAppKeys     WhatsAppSessionKey[]
   featureRequests  FeatureRequest[]
+  favorites        Favorite[]
 }
 
 // ---------- Auth ----------
@@ -272,9 +273,9 @@ model Group {
 }
 
 model Offer {
-  id                 String       @id @default(cuid())
+  id                 String          @id @default(cuid())
   tenantId           String
-  tenant             Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant             Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   store              Store
   externalId         String? // id do produto na loja (evita oferta repetida)
   title              String
@@ -286,17 +287,103 @@ model Offer {
   originalPriceCents Int?
   commissionCents    Int?
   couponCode         String?
-  status             OfferStatus  @default(DRAFT)
+  status             OfferStatus     @default(DRAFT)
   expiresAt          DateTime?
-  createdAt          DateTime     @default(now())
-  updatedAt          DateTime     @updatedAt
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
   posts              Post[]
   clicks             Click[]
   conversions        Conversion[]
+  // Produto do catálogo central de onde a oferta veio ("Divulgar este produto").
+  catalogProductId   String?
+  catalogProduct     CatalogProduct? @relation(fields: [catalogProductId], references: [id], onDelete: SetNull)
 
   @@unique([id, tenantId])
+  @@unique([tenantId, catalogProductId]) // o mesmo produto do catálogo vira no máximo 1 oferta por tenant
   @@index([tenantId, status])
   @@index([tenantId, store, externalId])
+}
+
+// ---------- Catálogo central (global, SEM tenant) ----------
+// Minerado pelo worker com credenciais CENTRAIS do sistema, usadas só para
+// minerar. productUrl é o link limpo da loja, nunca link de afiliado.
+
+enum CatalogCategory {
+  FOOD_BEVERAGES // Alimentos e Bebidas
+  BEAUTY // Beleza
+  HOME_KITCHEN_DECOR // Casa, Cozinha e Decoração
+  ELECTRONICS // Eletrônicos
+  KIDS_BABY // Infantil e Baby
+  FASHION // Moda
+  PETS // Pets
+  HEALTH // Saúde
+  OTHER // sem categoria definida
+}
+
+model CatalogProduct {
+  id                 String          @id @default(cuid())
+  store              Store
+  externalId         String // id do produto na loja (itemId da Shopee, ASIN da Amazon)
+  title              String
+  searchText         String // título minúsculo e sem acento (busca)
+  imageUrl           String?
+  productUrl         String // link limpo, sem tag de afiliado
+  category           CatalogCategory @default(OTHER)
+  priceCents         Int
+  originalPriceCents Int?
+  discountPct        Int? // 0 a 100
+  commissionPct      Float? // ex.: 7.5 (%)
+  commissionCents    Int?
+  rating             Float? // 0 a 5
+  soldCount          Int?
+  score              Float           @default(0) // ranking: vendas, nota, desconto, comissão
+  active             Boolean         @default(true)
+  firstSeenAt        DateTime        @default(now())
+  lastSeenAt         DateTime
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  favorites          Favorite[]
+  offers             Offer[]
+
+  @@unique([store, externalId])
+  @@index([active, score(sort: Desc)])
+  @@index([active, category, score(sort: Desc)])
+  @@index([active, store, score(sort: Desc)])
+  @@index([store, lastSeenAt])
+}
+
+// Favorito do catálogo: por tenant.
+model Favorite {
+  tenantId         String
+  tenant           Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  catalogProductId String
+  catalogProduct   CatalogProduct @relation(fields: [catalogProductId], references: [id], onDelete: Cascade)
+  createdAt        DateTime       @default(now())
+
+  @@id([tenantId, catalogProductId])
+  @@index([catalogProductId])
+}
+
+enum MiningRunStatus {
+  RUNNING
+  SUCCESS
+  FAILED
+  SKIPPED // minerador desligado (sem credencial central no .env)
+}
+
+// Histórico das execuções da mineração (diagnóstico).
+model CatalogMiningRun {
+  id          String          @id @default(cuid())
+  store       Store
+  status      MiningRunStatus
+  fetched     Int             @default(0) // itens recebidos da loja
+  upserted    Int             @default(0) // gravados (novos + atualizados)
+  deactivated Int             @default(0) // marcados active=false
+  message     String? // motivo do SKIPPED/FAILED (pt-BR)
+  startedAt   DateTime        @default(now())
+  finishedAt  DateTime?
+
+  @@index([store, startedAt(sort: Desc)])
 }
 
 model Post {

@@ -27,6 +27,22 @@ export {
   getFeatureRequest,
   type FeatureCode,
 } from "./feature-requests";
+export {
+  MIN_CATALOG_RATING,
+  CATALOG_PAGE_SIZE,
+  normalizeSearchText,
+  computeCatalogScore,
+  stripAffiliateParams,
+  saveMinedProducts,
+  findStaleCatalogProducts,
+  deactivateCatalogProducts,
+  listCatalog,
+  toggleFavorite,
+  createOfferFromCatalog,
+  getLatestMiningRuns,
+  type MinedProduct,
+  type CatalogFilters,
+} from "./catalog";
 export { PrismaClient, Prisma } from "./generated/prisma/client";
 export * from "./generated/prisma/enums";
 export type {
@@ -46,4 +62,7 @@ export type {
   WhatsAppSession,
   WhatsAppSessionKey,
   FeatureRequest,
+  CatalogProduct,
+  Favorite,
+  CatalogMiningRun,
 } from "./generated/prisma/client";
