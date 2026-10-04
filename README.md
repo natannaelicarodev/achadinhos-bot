@@ -1,8 +1,8 @@
 # Achadinhos Bot
 
-Bot de achadinhos/ofertas com painel web (Next.js) e worker (filas BullMQ, WhatsApp via Baileys, Telegram via grammY).
+Bot de achadinhos/ofertas com painel web (Next.js) e worker (filas BullMQ, WhatsApp via Baileys).
 
-> **Status:** fase 2 — conexão com WhatsApp (QR Code), grupos e envio de teste.
+> **Status:** fase 3 — lançamento só com WhatsApp; Telegram adiado (o painel registra pedidos de interesse).
 
 ## Estrutura
 

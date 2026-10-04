@@ -14,6 +14,7 @@ export const TENANT_SCOPED_MODELS = [
   "StoreCredential",
   "WhatsAppSession",
   "WhatsAppSessionKey",
+  "FeatureRequest",
 ] as const;
 
 const scopedModels = new Set<string>(TENANT_SCOPED_MODELS);

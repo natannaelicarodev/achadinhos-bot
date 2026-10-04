@@ -20,6 +20,13 @@ export {
   assertChannelWithinWhatsappLimit,
   assertCanEnableGroupPosting,
 } from "./limits";
+export {
+  FEATURE_CODES,
+  featureCodeSchema,
+  requestFeature,
+  getFeatureRequest,
+  type FeatureCode,
+} from "./feature-requests";
 export { PrismaClient, Prisma } from "./generated/prisma/client";
 export * from "./generated/prisma/enums";
 export type {
@@ -38,4 +45,5 @@ export type {
   StoreCredential,
   WhatsAppSession,
   WhatsAppSessionKey,
+  FeatureRequest,
 } from "./generated/prisma/client";
