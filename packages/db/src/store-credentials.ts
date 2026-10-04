@@ -28,10 +28,13 @@ export function maskSecret(value: string): string {
   return value.length <= 4 ? "••••" : `••••${value.slice(-4)}`;
 }
 
-/** Cria ou substitui a credencial da loja, criptografada. */
+/**
+ * Cria ou substitui a credencial da loja, criptografada. `verifiedAt` marca
+ * "Sincronizado"; salvar dados novos sem verificação volta para não sincronizado.
+ */
 export async function saveStoreCredential(
   tenantId: string,
-  input: { store: Store; label?: string | null; secrets: StoreSecrets },
+  input: { store: Store; label?: string | null; secrets: StoreSecrets; verifiedAt?: Date | null },
   options: Options = {},
 ) {
   const db = forTenant(tenantId, options.client);
@@ -39,13 +42,29 @@ export async function saveStoreCredential(
   const secrets = secretsSchema.parse(input.secrets);
   const encrypted = encrypt(JSON.stringify(secrets), key, aadFor(tenantId, input.store));
   const label = input.label ?? null;
+  const status = { verifiedAt: input.verifiedAt ?? null, lastError: null };
 
   return db.storeCredential.upsert({
     where: { tenantId_store: { tenantId, store: input.store } },
-    create: { tenantId, store: input.store, label, keyVersion: CURRENT_KEY_VERSION, ...encrypted },
-    update: { label, keyVersion: CURRENT_KEY_VERSION, ...encrypted },
-    select: { id: true, store: true, label: true, updatedAt: true },
+    create: { tenantId, store: input.store, label, keyVersion: CURRENT_KEY_VERSION, ...status, ...encrypted },
+    update: { label, keyVersion: CURRENT_KEY_VERSION, ...status, ...encrypted },
+    select: { id: true, store: true, label: true, updatedAt: true, verifiedAt: true },
   });
+}
+
+/** Resultado do botão "Testar": sincronizado (ok) ou motivo da falha. */
+export async function setStoreCredentialStatus(
+  tenantId: string,
+  store: Store,
+  status: { ok: true; at?: Date } | { ok: false; error: string },
+  options: Options = {},
+) {
+  const db = forTenant(tenantId, options.client);
+  const data = status.ok
+    ? { verifiedAt: status.at ?? new Date(), lastError: null }
+    : { verifiedAt: null, lastError: status.error.slice(0, 500) };
+  const { count } = await db.storeCredential.updateMany({ where: { store }, data });
+  return count > 0;
 }
 
 /** Segredos descriptografados (uso interno: integrações com a loja). */
@@ -77,6 +96,8 @@ export async function listStoreCredentials(tenantId: string, options: Options = 
       store: row.store,
       label: row.label,
       updatedAt: row.updatedAt,
+      verifiedAt: row.verifiedAt,
+      lastError: row.lastError,
       fields: Object.entries(secrets).map(([name, value]) => ({ name, masked: maskSecret(value) })),
     };
   });

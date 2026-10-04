@@ -1,7 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   computeCatalogScore,
-  createOfferFromCatalog,
   deactivateCatalogProducts,
   findStaleCatalogProducts,
   listCatalog,
@@ -12,6 +11,7 @@ import {
   type CatalogFilters,
   type MinedProduct,
 } from "../src/catalog";
+import { saveOfferForSending } from "../src/offers";
 import { createTestDatabase, type TestDatabase } from "../src/testing";
 
 let db: TestDatabase;
@@ -246,27 +246,28 @@ describe("catálogo no painel", () => {
     expect(await toggleFavorite(a.id, "nao-existe", opts)).toBeNull();
   });
 
-  it("Divulgar: cria 1 oferta (rascunho) por produto por tenant, com link limpo", async () => {
+  it("produto já divulgado aparece marcado (hasOffer) só para o tenant que divulgou", async () => {
     const t = await newTenant("divulgar");
     const other = await newTenant("divulgar-outro");
     const fone = await db.prisma.catalogProduct.findFirstOrThrow({ where: { externalId: "p-fone" } });
     const opts = { client: db.prisma };
-
-    const first = await createOfferFromCatalog(t.id, fone.id, opts);
-    const again = await createOfferFromCatalog(t.id, fone.id, opts);
-    expect(first?.created).toBe(true);
-    expect(again).toMatchObject({ created: false, offer: { id: first?.offer.id } });
-    expect(first?.offer).toMatchObject({
-      tenantId: t.id,
-      status: "DRAFT",
-      url: fone.productUrl,
-      affiliateUrl: null,
-      priceCents: fone.priceCents,
-    });
-    expect((await createOfferFromCatalog(other.id, fone.id, opts))?.created).toBe(true);
+    await saveOfferForSending(
+      t.id,
+      {
+        catalogProductId: fone.id,
+        store: fone.store,
+        externalId: fone.externalId,
+        title: fone.title,
+        url: fone.productUrl,
+        affiliateUrl: "https://s.shopee.com.br/x",
+        imageUrl: null,
+        priceCents: fone.priceCents,
+        originalPriceCents: null,
+        messageText: "msg",
+      },
+      opts,
+    );
     expect((await listCatalog(t.id, filters({ search: "fone" }), opts)).items[0]?.hasOffer).toBe(true);
-
-    const inactive = await db.prisma.catalogProduct.findFirstOrThrow({ where: { externalId: "velho1" } });
-    expect(await createOfferFromCatalog(t.id, inactive.id, opts)).toBeNull();
+    expect((await listCatalog(other.id, filters({ search: "fone" }), opts)).items[0]?.hasOffer).toBe(false);
   });
 });

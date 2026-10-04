@@ -34,9 +34,12 @@ export const CATALOG_STORES: { value: Store; label: string; className: string; h
   { value: "AMAZON", label: "Amazon", className: "bg-neutral-900 text-white" },
 ];
 
-export const STORE_LABEL: Partial<Record<Store, { label: string; className: string }>> = Object.fromEntries(
-  CATALOG_STORES.map((s) => [s.value, { label: s.label, className: s.className }]),
-);
+const SHEIN_BADGE = { label: "Shein", className: "bg-black text-white" };
+
+export const STORE_LABEL: Partial<Record<Store, { label: string; className: string }>> = {
+  ...Object.fromEntries(CATALOG_STORES.map((s) => [s.value, { label: s.label, className: s.className }])),
+  SHEIN: SHEIN_BADGE,
+};
 
 type Params = Record<string, string | string[] | undefined>;
 const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";

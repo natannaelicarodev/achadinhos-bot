@@ -79,6 +79,9 @@ export async function seedTenant(prisma: PrismaClient, name: string) {
   const favorite = await prisma.favorite.create({
     data: { tenantId: tenant.id, catalogProductId: catalogProduct.id },
   });
+  const messageTemplate = await prisma.messageTemplate.create({
+    data: { tenantId: tenant.id, body: `Modelo ${name} {link}`, headline: `Headline ${name}` },
+  });
 
   return {
     tenant,
@@ -96,6 +99,7 @@ export async function seedTenant(prisma: PrismaClient, name: string) {
     featureRequest,
     catalogProduct,
     favorite,
+    messageTemplate,
   };
 }
 

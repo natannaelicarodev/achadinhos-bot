@@ -245,47 +245,6 @@ export async function toggleFavorite(tenantId: string, catalogProductId: string,
   return true;
 }
 
-/**
- * "Divulgar este produto": cria a oferta (rascunho) do tenant a partir do
- * catálogo, uma por produto. O link de afiliado do cliente vem na fase 4b.
- */
-export async function createOfferFromCatalog(
-  tenantId: string,
-  catalogProductId: string,
-  options: { client?: PrismaClient } = {},
-) {
-  const db = forTenant(tenantId, options.client);
-  const product = await db.catalogProduct.findUnique({ where: { id: catalogProductId } });
-  if (!product || !product.active) return null;
-
-  const existing = await db.offer.findFirst({ where: { catalogProductId } });
-  if (existing) return { offer: existing, created: false };
-
-  try {
-    const offer = await db.offer.create({
-      data: {
-        tenantId,
-        catalogProductId,
-        store: product.store,
-        externalId: product.externalId,
-        title: product.title,
-        url: product.productUrl,
-        imageUrl: product.imageUrl,
-        priceCents: product.priceCents,
-        originalPriceCents: product.originalPriceCents,
-        commissionCents: product.commissionCents,
-        status: "DRAFT",
-      },
-    });
-    return { offer, created: true };
-  } catch (error) {
-    // Dois cliques ao mesmo tempo: o índice único segura; devolve a que ficou.
-    const again = await db.offer.findFirst({ where: { catalogProductId } });
-    if (again) return { offer: again, created: false };
-    throw error;
-  }
-}
-
 /** Última execução da mineração por loja (rodapé do catálogo). */
 export async function getLatestMiningRuns(client: PrismaClient) {
   const stores: Store[] = ["SHOPEE", "AMAZON"];

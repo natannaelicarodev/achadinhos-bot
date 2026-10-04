@@ -2,7 +2,7 @@
 
 Bot de achadinhos/ofertas com painel web (Next.js) e worker (filas BullMQ, WhatsApp via Baileys).
 
-> **Status:** fase 4a — catálogo central de produtos minerado nas lojas (Shopee), com página Catálogo no painel. Lançamento só com WhatsApp.
+> **Status:** fase 4b — credenciais de afiliado de cada cliente, conversão de links (Shopee, Mercado Livre, Amazon, Shein), tela Divulgar link e mensagem pronta. Lançamento só com WhatsApp.
 
 ## Estrutura
 
@@ -129,3 +129,28 @@ Para parar: `Ctrl + C`.
 | `pnpm db:seed`       | cadastra/atualiza os planos                    |
 | `pnpm db:migrate`    | cria migration nova a partir do schema (dev)   |
 | `pnpm db:studio`     | abre o Prisma Studio para ver os dados         |
+
+## Antes de lançar: teste de compra real (comissão chega ao afiliado?)
+
+Os testes automáticos garantem que o link é montado do jeito certo, mas só uma **compra de verdade** prova que a loja atribui a venda à sua conta de afiliado. Faça este roteiro uma vez por loja, com a **sua própria** conta de afiliado configurada em **Credenciais**.
+
+### Cuidados (valem para todas as lojas)
+
+1. Use uma **janela anônima** (Ctrl+Shift+N) e **não** esteja logado no portal de afiliados nem tenha clicado em link de outro afiliado antes: a loja costuma creditar o último link clicado.
+2. Abra o link gerado pelo painel **direto** (cole na barra do navegador ou clique pelo WhatsApp). Não navegue para outra loja no meio.
+3. Compre algo **barato e de vendedor confiável**, de preferência com "Compra garantida", e anote: loja, produto, data/hora, valor e o link usado.
+4. **Algumas lojas não pagam comissão** em compra feita pela própria conta do afiliado. Se possível, peça para outra pessoa comprar pelo link (no celular dela).
+5. Os prazos abaixo são típicos: cliques costumam aparecer no mesmo dia; pedidos podem levar de algumas horas a alguns dias para aparecer como "pendente" e semanas para "aprovado".
+
+### Roteiro por loja
+
+| Loja | Gerar o link no painel | O que conferir no seu portal de afiliado |
+|---|---|---|
+| **Shopee** | Catálogo > produto > **Divulgar este produto** > copiar "Seu link de afiliado" (`s.shopee.com.br/...`) | Portal de afiliados Shopee > relatório de **cliques** e de **conversões/pedidos**: o pedido aparece e o campo de **Sub ID** (utmContent) mostra o id do seu tenant |
+| **Mercado Livre** | **Divulgar link** > colar o endereço de um produto do ML > copiar o link (tem `matt_word` e `matt_tool`) | Portal de Afiliados do Mercado Livre > relatório de **cliques** e **vendas** na sua etiqueta (`matt_word`) |
+| **Amazon** | **Divulgar link** > colar um produto da amazon.com.br > copiar o link (`/dp/...?tag=sua-tag-20`) | Associados Amazon > **Relatórios** > cliques e **itens pedidos** filtrando pela sua tag (pode levar até 24h) |
+| **Shein** | **Divulgar link** > colar um produto de br.shein.com > copiar o link (`url_from=affiliate_koc_SEUID&campaign_id=20`) | Central de afiliados da Shein > pedidos/comissões. **Confirme aqui o `campaign_id=20`**: se o pedido não aparecer e o mesmo produto comprado por um link gerado pelo app da Shein aparecer, avise para trocarmos a constante `SHEIN_CAMPAIGN_ID` |
+
+### Registro do resultado
+
+Para cada loja, anote: **link usado**, **data/hora da compra**, **clique apareceu? (sim/não, quando)**, **pedido apareceu? (sim/não, quando)**, **status/comissão**. Se o clique aparecer e o pedido não, espere o prazo da loja antes de concluir. Se nem o clique aparecer, o link não está atribuindo: guarde o link exato e reporte.
