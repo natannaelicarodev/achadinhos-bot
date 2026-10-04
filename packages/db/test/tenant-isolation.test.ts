@@ -35,6 +35,7 @@ describe("forTenant: leitura", () => {
       dbA.whatsAppSession.findMany(),
       dbA.whatsAppSessionKey.findMany(),
       dbA.featureRequest.findMany(),
+      dbA.favorite.findMany(),
     ]);
     for (const rows of lists) {
       expect(rows).toHaveLength(1);
@@ -120,6 +121,12 @@ describe("forTenant: leitura", () => {
     await expect(dbA.passwordResetToken.findMany()).rejects.toBeInstanceOf(TenantScopeError);
     expect(await dbA.plan.count()).toBe(3);
     await expect(dbA.plan.updateMany({ data: { priceCents: 0 } })).rejects.toBeInstanceOf(TenantScopeError);
+    // Catálogo central: todos leem, ninguém altera pelo client de tenant.
+    expect(await dbA.catalogProduct.count()).toBeGreaterThanOrEqual(2);
+    await expect(
+      dbA.catalogProduct.updateMany({ data: { priceCents: 1 } }),
+    ).rejects.toBeInstanceOf(TenantScopeError);
+    await expect(dbA.catalogMiningRun.deleteMany()).rejects.toBeInstanceOf(TenantScopeError);
   });
 });
 
@@ -219,6 +226,7 @@ describe("exclusão de tenant", () => {
       db.prisma.whatsAppSession.count({ where }),
       db.prisma.whatsAppSessionKey.count({ where }),
       db.prisma.featureRequest.count({ where }),
+      db.prisma.favorite.count({ where }),
     ]);
     expect(counts.every((n) => n === 0)).toBe(true);
     expect(await db.prisma.offer.count({ where: { tenantId: b.tenant.id } })).toBe(1);

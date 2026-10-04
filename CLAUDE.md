@@ -6,7 +6,7 @@ SaaS multi-tenant de "achadinhos": coleta ofertas, gerencia no painel web e disp
 
 **Lançamento só com WhatsApp. Telegram está FORA do escopo atual** (decisão de produto): não implementar nada de Telegram (bot, envio, tela, job, integração grammY) sem o dono do produto pedir. O que já existe fica como está e não deve ser removido: `Plan.maxTelegramBots`, `ChannelType.TELEGRAM`, a dependência `grammy` e o stub `apps/worker/src/telegram/`. No painel, a aba Telegram de Canais só registra interesse ("Quero usar o Telegram" -> `FeatureRequest`).
 
-Status atual: **fase 3** (Telegram adiado + pedido de interesse). Fase 2: WhatsApp via Baileys (conexão por QR, sessão no Postgres, reconexão, grupos, envio de teste). Fase 1: contas, login, multi-tenant, painel base, credenciais de lojas criptografadas.
+Status atual: **fase 4a** (catálogo central minerado nas lojas + página Catálogo). Fase 3: Telegram adiado + pedido de interesse. Fase 2: WhatsApp via Baileys (conexão por QR, sessão no Postgres, reconexão, grupos, envio de teste). Fase 1: contas, login, multi-tenant, painel base, credenciais de lojas criptografadas.
 
 Planos: Iniciante (`starter`, R$ 79,90), Pro (`pro`, R$ 149,90), Agência (`agency`, R$ 297,00) — definidos em `packages/db/src/plans.ts`. Cadastro = trial de 7 dias no Iniciante; trial vencido vira `PAST_DUE` (pausa de envios: fase 9).
 
@@ -35,6 +35,10 @@ apps/worker/src/whatsapp/  auth-state.ts (sessão no Postgres), manager.ts (sock
                        lock.ts (trava Redis), groups.ts, send.ts (sendOfferToWhatsApp), image.ts, rate-limit.ts
 apps/worker/test/      auth state, reconexão, limites, imagem, grupos/envio (Vitest + PGlite)
 packages/jobs/         @achadinhos/jobs: nome da fila, schemas zod dos jobs, chaves Redis (contrato web <-> worker)
+packages/db/src/catalog.ts       gravação da mineração, ranking, listCatalog, favoritos, "Divulgar"
+apps/worker/src/catalog/         types.ts (CatalogMiner), shopee.ts, amazon.ts, run.ts; queues/catalog.ts (agendamento)
+apps/web/app/painel/catalogo/    página Catálogo (cards, busca, categorias, lojas, favoritos, modal)
+apps/web/app/painel/divulgar-link/  tela da fase 4b (por enquanto só aviso)
 packages/db/prisma/    schema.prisma, migrations/, seed.ts
 packages/db/src/       client.ts (getPrisma), tenant.ts (forTenant), crypto.ts, store-credentials.ts,
                        subscription.ts, plans.ts, testing.ts (banco PGlite p/ testes), generated/ (gitignored)
@@ -75,6 +79,18 @@ cd apps/web && pnpm dlx shadcn@latest add <componente>   # novo componente shadc
 - Testes de banco: `createTestDatabase()` de `@achadinhos/db/testing` (PGlite em processo, aplica as migrations reais).
 - Pedidos de interesse em recursos futuros: tabela `FeatureRequest` (`tenantId`, `userId`, `feature`, `createdAt`), um voto por tenant e recurso (`@@unique([tenantId, feature])`). Usar `requestFeature`/`getFeatureRequest` (`packages/db/src/feature-requests.ts`); recurso novo = novo código em `FEATURE_CODES` (sem migration). Hoje: `"telegram"`.
 - Limites do plano: `assertCanAddWhatsappNumber`, `assertChannelWithinWhatsappLimit`, `assertCanEnableGroupPosting` (`packages/db/src/limits.ts`). Checar no painel E no worker.
+
+## Catálogo central e ofertas
+
+- **Catálogo central** (`CatalogProduct`, SEM tenantId): igual para todos os clientes, minerado pelo worker (`apps/worker/src/catalog/`, fila `catalog`, a cada `CATALOG_MINING_INTERVAL_MINUTES`, padrão 60). Tenant só LÊ o catálogo (`forTenant` bloqueia escrita); `Favorite` é por tenant.
+- Interface `CatalogMiner` (status/mine/verify) por loja. Cada execução gera `CatalogMiningRun` (SUCCESS / FAILED / SKIPPED com motivo).
+- **Credenciais centrais do sistema** (`SHOPEE_CATALOG_*`, `AMAZON_CATALOG_*`) servem SÓ para minerar. NUNCA para gerar link de cliente. O catálogo guarda só link limpo da loja (`stripAffiliateParams`; a consulta da Shopee nem pede `offerLink`). Link de afiliado do cliente = credencial/etiqueta DO CLIENTE (fase 4b).
+- Ranking: `computeCatalogScore` (vendas 45%, nota 25%, desconto 15%, comissão 15%). Nota informada abaixo de 4,5 não entra / sai do catálogo. Produto parado há 24h é reconferido pelo id; se a loja não devolver mais, `active=false` (erro de rede não desativa).
+- **Shopee:** Open API de afiliados (GraphQL, assinatura SHA256(AppId+Timestamp+Payload+Secret)), busca por palavras-chave de cada categoria (mais vendidos e maior comissão) + "top performing".
+- **Amazon:** Creators API. Token OAuth e `getItems` implementados (documentados). O caminho HTTP do `searchItems` NÃO está na documentação oficial: minerador desligado (SKIPPED) até confirmar. Não inventar endpoint. A API não devolve nota, vendidos nem comissão (exige 10 vendas/30 dias na conta).
+- **Mercado Livre fica FORA do catálogo** (busca pública da API responde 403; "mais vendidos" exige OAuth; sem raspagem). Ele entra no sistema na **fase 4b, pela tela "Divulgar link"** (`/painel/divulgar-link`, junto com a Shein): o cliente cola o endereço do produto e o sistema converte com a etiqueta DELE. No catálogo, o filtro Mercado Livre é um atalho para essa tela.
+- "Divulgar este produto" cria `Offer` em rascunho ligada ao catálogo (`Offer.catalogProductId`, uma por produto por tenant).
+- **Pendente para a fase 5:** `Post` NÃO guarda cópia do que foi enviado (só shortCode, status, datas, id da mensagem, erro). Antes de enviar posts reais, acrescentar snapshot no `Post` (texto final, preço e link enviados) para o histórico não mudar quando a `Offer` for atualizada.
 
 ## WhatsApp (Baileys)
 

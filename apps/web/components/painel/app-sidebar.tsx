@@ -7,6 +7,7 @@ import {
   LogOutIcon,
   RadioTowerIcon,
   SettingsIcon,
+  ShoppingBagIcon,
   TagIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -27,6 +28,7 @@ import { logoutAction } from "@/lib/auth/actions";
 export const MENU = [
   { title: "Início", href: "/painel", icon: HomeIcon },
   { title: "Canais", href: "/painel/canais", icon: RadioTowerIcon },
+  { title: "Catálogo", href: "/painel/catalogo", icon: ShoppingBagIcon },
   { title: "Ofertas", href: "/painel/ofertas", icon: TagIcon },
   { title: "Agendamento", href: "/painel/agendamento", icon: CalendarClockIcon },
   { title: "Relatórios", href: "/painel/relatorios", icon: BarChart3Icon },

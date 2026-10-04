@@ -17,6 +17,13 @@ const envSchema = z.object({
     }),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
   TELEGRAM_BOT_TOKEN: z.string().min(1).optional(),
+  // Catálogo central: credenciais DO SISTEMA, usadas só para minerar (nunca para link de cliente).
+  CATALOG_MINING_INTERVAL_MINUTES: z.coerce.number().int().min(5).max(24 * 60).default(60),
+  SHOPEE_CATALOG_APP_ID: z.string().min(1).optional(),
+  SHOPEE_CATALOG_SECRET: z.string().min(1).optional(),
+  AMAZON_CATALOG_CREDENTIAL_ID: z.string().min(1).optional(),
+  AMAZON_CATALOG_CREDENTIAL_SECRET: z.string().min(1).optional(),
+  AMAZON_CATALOG_PARTNER_TAG: z.string().min(1).optional(),
 });
 
 /** No .env, `VAR=""` significa "não definida". */

@@ -15,12 +15,13 @@ export const TENANT_SCOPED_MODELS = [
   "WhatsAppSession",
   "WhatsAppSessionKey",
   "FeatureRequest",
+  "Favorite",
 ] as const;
 
 const scopedModels = new Set<string>(TENANT_SCOPED_MODELS);
 
-/** Models globais que o client de tenant pode só ler. */
-const readOnlyGlobalModels = new Set<string>(["Plan"]);
+/** Models globais que o client de tenant pode só ler (catálogo central incluso). */
+const readOnlyGlobalModels = new Set<string>(["Plan", "CatalogProduct", "CatalogMiningRun"]);
 
 const READ_OPERATIONS = new Set([
   "findUnique",

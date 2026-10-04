@@ -45,3 +45,7 @@ export const redisKeys = {
 };
 
 export const QR_TTL_SECONDS = 60;
+
+/** Fila da mineração do catálogo central (só o worker usa). */
+export const CATALOG_QUEUE = "catalog";
+export const CATALOG_SCHEDULER_ID = "catalog-mining";
