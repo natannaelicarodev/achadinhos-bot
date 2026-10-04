@@ -17,6 +17,10 @@ dist/
 build/
 *.tsbuildinfo
 
+# extensão gerada no build (o painel serve o .zip; não versionar)
+apps/extension/dist/
+apps/web/public/downloads/
+
 # prisma client gerado
 packages/db/src/generated/
 

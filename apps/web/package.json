@@ -4,14 +4,15 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
+    "dev": "pnpm --filter @achadinhos/extension build && next dev",
+    "build": "pnpm --filter @achadinhos/extension build && next build",
     "start": "next start",
     "typecheck": "next typegen && tsc -p tsconfig.json",
     "test": "vitest run"
   },
   "dependencies": {
     "@achadinhos/db": "workspace:*",
+    "@achadinhos/extension": "workspace:^",
     "@achadinhos/jobs": "workspace:^",
     "@achadinhos/stores": "workspace:^",
     "@base-ui/react": "^1.8.0",

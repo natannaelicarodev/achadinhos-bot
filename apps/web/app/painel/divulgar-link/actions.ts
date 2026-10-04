@@ -42,13 +42,18 @@ export interface SharePreview {
   shortLink: string | null;
   /** Aviso em pt-BR mostrado acima do link. */
   notice: string | null;
+  /**
+   * Mercado Livre: etiqueta do cliente para a EXTENSÃO gerar o meli.la no navegador
+   * (null se não for ML, se já for o meli.la do cliente ou se faltar a credencial).
+   */
+  mlTag: string | null;
   settings: MessageSettings;
 }
 
 export type PreviewResult = { ok: true; preview: SharePreview } | { ok: false; error: string };
 
 const ML_PREFER_SHORT_LINK =
-  "Para garantir que a venda conte para você, prefira colar o link meli.la gerado no seu portal de afiliados do Mercado Livre.";
+  "Instale a extensão (menu Extensão) para gerar o seu link meli.la automaticamente, ou cole aqui o link meli.la gerado no portal de afiliados do Mercado Livre.";
 const ML_OWN_SHORT_LINK = "Usando o seu link meli.la: quem clicar vê a página do Mercado Livre com a sua recomendação.";
 
 async function tenantMercadoLivreTags(tenantId: string): Promise<MercadoLivreSecrets | null> {
@@ -69,7 +74,8 @@ function shortLinkProductRef(shortLink: URL, landing: URL): ProductRef {
 }
 
 function buildPreview(
-  base: Pick<SharePreview, "product" | "catalogProductId" | "settings"> & Partial<Pick<SharePreview, "shortLink" | "notice">>,
+  base: Pick<SharePreview, "product" | "catalogProductId" | "settings"> &
+    Partial<Pick<SharePreview, "shortLink" | "notice" | "mlTag">>,
   info: (PageProductInfo & { discountPct?: number | null }) | null,
   link: LinkResult,
   needsManualInfo: boolean,
@@ -78,6 +84,7 @@ function buildPreview(
     ...base,
     shortLink: base.shortLink ?? null,
     notice: base.notice ?? null,
+    mlTag: base.mlTag ?? null,
     info: {
       title: info?.title ?? null,
       imageUrl: info?.imageUrl ?? null,
@@ -125,7 +132,15 @@ async function previewMercadoLivreShortLink(tenantId: string, shortLink: URL): P
     return { ok: false, error: "Não encontrei o produto nesse link. Abra o produto no Mercado Livre e cole o endereço da página dele." };
   }
   const link = await affiliateLinkFor(tenantId, product);
-  return { ok: true, preview: buildPreview({ product, catalogProductId: null, settings }, info, link, needsManualInfo) };
+  return {
+    ok: true,
+    preview: buildPreview(
+      { product, catalogProductId: null, settings, notice: ML_PREFER_SHORT_LINK, mlTag: own?.mattWord ?? null },
+      info,
+      link,
+      needsManualInfo,
+    ),
+  };
 }
 
 /** "Divulgar link": identifica a loja, converte com a credencial do cliente e lê os dados do produto. */
@@ -152,10 +167,12 @@ export async function previewPastedLinkAction(rawUrl: string): Promise<PreviewRe
     return { ok: false, error: "Não encontrei um produto nesse endereço. Abra a página do produto na loja e copie o link de lá." };
   }
 
-  const [link, info, settings] = await Promise.all([
+  const isMl = product.store === "MERCADO_LIVRE";
+  const [link, info, settings, mlTags] = await Promise.all([
     affiliateLinkFor(user.tenantId, product),
     readProductInfo(product),
     getMessageSettings(user.tenantId),
+    isMl ? tenantMercadoLivreTags(user.tenantId) : Promise.resolve(null),
   ]);
   return {
     ok: true,
@@ -164,7 +181,8 @@ export async function previewPastedLinkAction(rawUrl: string): Promise<PreviewRe
         product,
         catalogProductId: null,
         settings,
-        notice: product.store === "MERCADO_LIVRE" ? ML_PREFER_SHORT_LINK : null,
+        notice: isMl ? ML_PREFER_SHORT_LINK : null,
+        mlTag: mlTags?.mattWord ?? null,
       },
       info,
       link,
@@ -182,11 +200,21 @@ export async function previewCatalogProductAction(catalogProductId: string): Pro
   if (!row || !row.active) return { ok: false, error: "Este produto saiu do catálogo." };
 
   const product: ProductRef = { store: row.store, externalId: row.externalId, productUrl: row.productUrl };
-  const [link, settings] = await Promise.all([affiliateLinkFor(user.tenantId, product), getMessageSettings(user.tenantId)]);
+  const isMl = row.store === "MERCADO_LIVRE";
+  const [link, settings, mlTags] = await Promise.all([
+    affiliateLinkFor(user.tenantId, product),
+    getMessageSettings(user.tenantId),
+    isMl ? tenantMercadoLivreTags(user.tenantId) : Promise.resolve(null),
+  ]);
   return {
     ok: true,
     preview: buildPreview(
-      { product, catalogProductId: row.id, settings },
+      {
+        product,
+        catalogProductId: row.id,
+        settings,
+        ...(isMl ? { notice: ML_PREFER_SHORT_LINK, mlTag: mlTags?.mattWord ?? null } : {}),
+      },
       {
         title: row.title,
         imageUrl: row.imageUrl,
@@ -198,6 +226,30 @@ export async function previewCatalogProductAction(catalogProductId: string): Pro
       false,
     ),
   };
+}
+
+/**
+ * meli.la gerado pela EXTENSÃO no navegador: o servidor confere que é do
+ * cliente (Etiqueta e ID da Ferramenta batem) antes de o painel usar.
+ */
+export async function confirmExtensionLinkAction(shortLink: string): Promise<{ ok: true; link: string } | { ok: false; error: string }> {
+  const { user } = await requireSession();
+  const url = parseHttpsUrl(z.string().max(300).catch("").parse(shortLink));
+  if (!url || !isMercadoLivreShortLink(url)) return { ok: false, error: "A extensão devolveu um link inválido." };
+  try {
+    const { tags } = await resolveMercadoLivreShortLink(url.toString());
+    if (!isOwnMercadoLivreLink(tags, await tenantMercadoLivreTags(user.tenantId))) {
+      return {
+        ok: false,
+        error:
+          "O link gerado não é da etiqueta configurada em Credenciais. Confira se o Mercado Livre logado neste navegador é a mesma conta de afiliado.",
+      };
+    }
+    return { ok: true, link: canonicalShortLink(url) };
+  } catch (error) {
+    if (error instanceof StoreUrlError) return { ok: false, error: error.message };
+    throw error;
+  }
 }
 
 const sendSchema = z.object({

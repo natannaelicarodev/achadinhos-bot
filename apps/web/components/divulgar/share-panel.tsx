@@ -3,13 +3,14 @@
 import { formatBRL, messageVariables, renderMessage } from "@achadinhos/stores/message";
 import { CopyIcon, ImageIcon, SendIcon } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState, useTransition } from "react";
-import { sendToGroupsAction, type SharePreview } from "@/app/painel/divulgar-link/actions";
+import { useEffect, useMemo, useState, useTransition } from "react";
+import { confirmExtensionLinkAction, sendToGroupsAction, type SharePreview } from "@/app/painel/divulgar-link/actions";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { copyImage, copyText } from "@/lib/clipboard";
+import { callExtension, detectExtension } from "@/lib/extension-client";
 import { WhatsappPreview } from "./whatsapp-preview";
 
 const centsToInput = (cents: number | null) => (cents === null ? "" : (cents / 100).toFixed(2).replace(".", ","));
@@ -17,6 +18,8 @@ function inputToCents(value: string): number | null {
   const n = Number(value.replace(/\./g, "").replace(",", ".").replace(/[^\d.]/g, ""));
   return Number.isFinite(n) && n > 0 ? Math.round(n * 100) : null;
 }
+
+type Notice = { text: string; tone: "ok" | "warn" | "info"; installLink?: boolean } | null;
 
 /** Link de afiliado + mensagem pronta + Copiar / Enviar para meus grupos. */
 export function SharePanel({ preview, editableInfo }: { preview: SharePreview; editableInfo: boolean }) {
@@ -27,10 +30,73 @@ export function SharePanel({ preview, editableInfo }: { preview: SharePreview; e
   const [imageUrl, setImageUrl] = useState(preview.info.imageUrl ?? "");
   const [feedback, setFeedback] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, startTransition] = useTransition();
+  const [link, setLink] = useState(preview.link);
+  const [shortLink, setShortLink] = useState(preview.shortLink);
+  const [notice, setNotice] = useState<Notice>(
+    preview.notice ? { text: preview.notice, tone: preview.shortLink ? "ok" : "warn" } : null,
+  );
+  const [extensionBusy, setExtensionBusy] = useState(false);
+  const [needsManualInfo, setNeedsManualInfo] = useState(preview.needsManualInfo);
+
+  // Mercado Livre: a extensão gera o meli.la e lê o preço real no navegador do cliente.
+  useEffect(() => {
+    const tag = preview.mlTag;
+    if (!tag || preview.shortLink) return;
+    let cancelled = false;
+    void (async () => {
+      setExtensionBusy(true);
+      setNotice({ text: "Gerando seu link meli.la pela extensão...", tone: "info" });
+      const installed = await detectExtension();
+      if (cancelled) return;
+      if (!installed) {
+        setExtensionBusy(false);
+        setNotice({
+          text: "Instale a extensão para gerar o seu link meli.la e o preço real automaticamente. Enquanto isso, o link abaixo usa a sua etiqueta.",
+          tone: "warn",
+          installLink: true,
+        });
+        return;
+      }
+      const productUrl = preview.product.productUrl;
+      const [created, info] = await Promise.all([
+        callExtension("ml.createLink", { productUrl, tag }),
+        callExtension("ml.productInfo", { productUrl }),
+      ]);
+      if (cancelled) return;
+      if (info.ok) {
+        // Preço real (com a sessão do navegador) vale mais que o do catálogo/página lida no servidor.
+        if (info.data.priceCents) setPrice(centsToInput(info.data.priceCents));
+        if (info.data.originalPriceCents) setOriginalPrice(centsToInput(info.data.originalPriceCents));
+        if (info.data.title) setTitle((t) => t || info.data.title || "");
+        if (info.data.imageUrl) setImageUrl((u) => u || info.data.imageUrl || "");
+        if (info.data.title && info.data.priceCents) setNeedsManualInfo(false);
+      }
+      if (!created.ok) {
+        setExtensionBusy(false);
+        setNotice({ text: `Não foi possível gerar o meli.la pela extensão: ${created.error}`, tone: "warn" });
+        return;
+      }
+      const confirmed = await confirmExtensionLinkAction(created.data.shortUrl);
+      if (cancelled) return;
+      setExtensionBusy(false);
+      if (!confirmed.ok) {
+        setNotice({ text: confirmed.error, tone: "warn" });
+        return;
+      }
+      setLink(confirmed.link);
+      setShortLink(confirmed.link);
+      setNotice({
+        text: "Link meli.la gerado pela extensão: quem clicar vê a página do Mercado Livre com a sua recomendação.",
+        tone: "ok",
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [preview]);
 
   const priceCents = inputToCents(price);
   const originalPriceCents = inputToCents(originalPrice);
-  const link = preview.link;
 
   const message = useMemo(() => {
     const product = {
@@ -49,9 +115,23 @@ export function SharePanel({ preview, editableInfo }: { preview: SharePreview; e
       {/* Link de afiliado */}
       <section className="grid gap-2">
         <Label>Seu link de afiliado</Label>
-        {preview.notice ? (
-          <p className={preview.shortLink ? "text-xs text-green-700" : "text-xs text-amber-700 dark:text-amber-400"}>
-            {preview.notice}
+        {notice ? (
+          <p
+            role="status"
+            className={
+              notice.tone === "ok"
+                ? "text-xs text-green-700"
+                : notice.tone === "info"
+                  ? "text-xs text-muted-foreground"
+                  : "text-xs text-amber-700 dark:text-amber-400"
+            }
+          >
+            {notice.text}{" "}
+            {notice.installLink ? (
+              <Link href="/painel/extensao" className="font-medium underline underline-offset-4">
+                Instalar extensão
+              </Link>
+            ) : null}
           </p>
         ) : null}
         {link ? (
@@ -84,7 +164,7 @@ export function SharePanel({ preview, editableInfo }: { preview: SharePreview; e
       {/* Dados do produto (editáveis no "Divulgar link") */}
       {editableInfo ? (
         <section className="grid gap-3 rounded-lg border p-3">
-          {preview.needsManualInfo ? (
+          {needsManualInfo ? (
             <p className="text-xs text-muted-foreground">
               Não consegui ler todos os dados da página da loja. Confira e preencha os campos abaixo.
             </p>
@@ -157,14 +237,14 @@ export function SharePanel({ preview, editableInfo }: { preview: SharePreview; e
         </Button>
         <Button
           type="button"
-          disabled={!link || pending}
+          disabled={!link || pending || extensionBusy}
           onClick={() =>
             startTransition(async () => {
               if (!priceCents) return flash(false, "Informe o preço do produto.");
               const result = await sendToGroupsAction({
                 productUrl: preview.product.productUrl,
                 catalogProductId: preview.catalogProductId,
-                shortLink: preview.shortLink,
+                shortLink,
                 headline,
                 title,
                 priceCents,

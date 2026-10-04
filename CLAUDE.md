@@ -6,7 +6,7 @@ SaaS multi-tenant de "achadinhos": coleta ofertas, gerencia no painel web e disp
 
 **Lançamento só com WhatsApp. Telegram está FORA do escopo atual** (decisão de produto): não implementar nada de Telegram (bot, envio, tela, job, integração grammY) sem o dono do produto pedir. O que já existe fica como está e não deve ser removido: `Plan.maxTelegramBots`, `ChannelType.TELEGRAM`, a dependência `grammy` e o stub `apps/worker/src/telegram/`. No painel, a aba Telegram de Canais só registra interesse ("Quero usar o Telegram" -> `FeatureRequest`).
 
-Status atual: **fase 4b** (credenciais de afiliado do cliente, conversão de links, Divulgar link, mensagem pronta). Fase 4a: catálogo central minerado nas lojas + página Catálogo. Fase 3: Telegram adiado + pedido de interesse. Fase 2: WhatsApp via Baileys (conexão por QR, sessão no Postgres, reconexão, grupos, envio de teste). Fase 1: contas, login, multi-tenant, painel base, credenciais de lojas criptografadas.
+Status atual: **fase 4c** (extensão do Chrome: meli.la e preço real do Mercado Livre automáticos). Fase 4b: credenciais de afiliado do cliente, conversão de links, Divulgar link, mensagem pronta. Fase 4a: catálogo central minerado nas lojas + página Catálogo. Fase 3: Telegram adiado + pedido de interesse. Fase 2: WhatsApp via Baileys (conexão por QR, sessão no Postgres, reconexão, grupos, envio de teste). Fase 1: contas, login, multi-tenant, painel base, credenciais de lojas criptografadas.
 
 Planos: Iniciante (`starter`, R$ 79,90), Pro (`pro`, R$ 149,90), Agência (`agency`, R$ 297,00) — definidos em `packages/db/src/plans.ts`. Cadastro = trial de 7 dias no Iniciante; trial vencido vira `PAST_DUE` (pausa de envios: fase 9).
 
@@ -60,7 +60,7 @@ pnpm install         # instala tudo + prisma generate
 pnpm dev             # web (localhost:3000) + worker em paralelo
 pnpm build           # build de todos os pacotes
 pnpm typecheck       # tsc em todos os pacotes
-pnpm test            # Vitest (db + stores + web + worker), banco PGlite em memória, sem rede
+pnpm test            # Vitest (db + stores + extension + web + worker), banco PGlite em memória, sem rede
 pnpm db:generate     # prisma generate
 pnpm db:migrate      # prisma migrate dev (cria migration nova)
 pnpm db:deploy       # prisma migrate deploy (aplica pendentes)
@@ -110,6 +110,16 @@ cd apps/web && pnpm dlx shadcn@latest add <componente>   # novo componente shadc
 - Mensagem: `MessageTemplate` (um por tenant; sem linha = modelo padrão). Variáveis `{headline} {titulo} {preco_de} {preco_por} {desconto} {link}`; linha com variável vazia some. Editor em Configurações.
 - "Enviar para meus grupos": o servidor REFAZ o link e a mensagem (não confia no navegador) e grava a `Offer` (`saveOfferForSending`: `affiliateUrl`, `messageText`, `sendRequestedAt`, status ACTIVE). Uma oferta por produto do catálogo por tenant. O envio aos grupos é da fase 5 (ofertas com `sendRequestedAt`).
 - **Pendente para a fase 5:** `Post` NÃO guarda cópia do que foi enviado (só shortCode, status, datas, id da mensagem, erro). Antes de enviar posts reais, acrescentar snapshot no `Post` (texto final, preço e link enviados) para o histórico não mudar quando a `Offer` for atualizada.
+
+## Extensão do Chrome (fase 4c)
+
+- `apps/extension` (`@achadinhos/extension`): Manifest V3, gerada por `pnpm --filter @achadinhos/extension build` (esbuild) em `dist/` + `.zip` em `apps/web/public/downloads/achadinhos-extensao.zip` (ambos no .gitignore; o build/dev do web gera antes). **Distribuição só pelo painel** (página Extensão, instalação "Carregar sem compactação"); NÃO publicar na Chrome Web Store.
+- Por que existe: o Mercado Livre não tem API de afiliados. O link meli.la só é gerado pelo portal com a sessão do usuário. A extensão faz o MESMO pedido do botão "Gerar" do portal: `POST https://www.mercadolivre.com.br/affiliate-program/api/v2/affiliates/createLink` com `{ urls: [produto], tag }` e header `x-csrf-token` (token em `<meta name="csrf-token">` da página `/afiliados/hub`). Resposta: `urls[0].short_url` (meli.la), `long_url` (página social com `ref`). Endpoint INTERNO: pode mudar sem aviso; o painel sempre tem plano B (colar o meli.la).
+- Os pedidos ao ML rodam DENTRO de uma aba do ML (`chrome.scripting.executeScript`, `ml-tab.ts`): do service worker o ML recusa (origem chrome-extension). Usa aba do ML aberta; se não houver, abre uma em segundo plano e fecha.
+- Permissões mínimas: `scripting` + hosts do ML (`mercadolivre.com.br`, `meli.la`). Content script só nas origens do painel (localhost:3000 + `APP_URL`, injetadas no build). Sessão/cookies do ML NUNCA saem do navegador: o painel recebe só link, título, preço e imagem.
+- Protocolo (`apps/extension/src/protocol.ts`): painel -> `window.postMessage({source:"achadinhos-panel", id, type, payload})`; tipos `ping`, `ml.createLink`, `ml.productInfo`, `ml.diagnose`. Validação zod no service worker; a ponte (`content.ts`) só repassa formato válido da própria janela.
+- O servidor CONFERE todo meli.la vindo da extensão (`confirmExtensionLinkAction`: etiqueta e ferramenta batem com a credencial do tenant).
+- Versão: `EXTENSION_VERSION` (`constants.ts`). Mudou a extensão -> subir a versão; o painel avisa "baixe a nova" (`isOutdated`). Atualização é manual (baixar, substituir arquivos, recarregar ↻).
 
 ## WhatsApp (Baileys)
 
