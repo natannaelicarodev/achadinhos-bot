@@ -32,6 +32,8 @@ describe("forTenant: leitura", () => {
       dbA.click.findMany(),
       dbA.conversion.findMany(),
       dbA.storeCredential.findMany(),
+      dbA.whatsAppSession.findMany(),
+      dbA.whatsAppSessionKey.findMany(),
     ]);
     for (const rows of lists) {
       expect(rows).toHaveLength(1);
@@ -51,6 +53,28 @@ describe("forTenant: leitura", () => {
     expect(await dbA.conversion.findUnique({ where: { id: b.conversion.id } })).toBeNull();
     expect(await dbA.storeCredential.findUnique({ where: { id: b.credential.id } })).toBeNull();
     expect(await dbA.user.findUnique({ where: { email: b.user.email } })).toBeNull();
+    expect(await dbA.whatsAppSession.findUnique({ where: { channelId: b.channel.id } })).toBeNull();
+    expect(
+      await dbA.whatsAppSessionKey.findUnique({
+        where: { channelId_type_keyId: { channelId: b.channel.id, type: "pre-key", keyId: "1" } },
+      }),
+    ).toBeNull();
+  });
+
+  it("sessão do WhatsApp não pode apontar para canal de outro tenant (FK composta)", async () => {
+    await expect(
+      db.prisma.whatsAppSessionKey.create({
+        data: {
+          tenantId: a.tenant.id,
+          channelId: b.channel.id,
+          type: "session",
+          keyId: "x",
+          ciphertext: new Uint8Array([1]),
+          iv: new Uint8Array(12),
+          authTag: new Uint8Array(16),
+        },
+      }),
+    ).rejects.toMatchObject({ code: "P2003" });
   });
 
   it("findFirst / findUniqueOrThrow não acham registro de outro tenant", async () => {
@@ -191,6 +215,8 @@ describe("exclusão de tenant", () => {
       db.prisma.click.count({ where }),
       db.prisma.conversion.count({ where }),
       db.prisma.storeCredential.count({ where }),
+      db.prisma.whatsAppSession.count({ where }),
+      db.prisma.whatsAppSessionKey.count({ where }),
     ]);
     expect(counts.every((n) => n === 0)).toBe(true);
     expect(await db.prisma.offer.count({ where: { tenantId: b.tenant.id } })).toBe(1);

@@ -1,11 +1,13 @@
-import { getCurrentSubscription } from "@achadinhos/db";
+import { forTenant, getCurrentSubscription } from "@achadinhos/db";
 import type { Metadata } from "next";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { AppSidebar } from "@/components/painel/app-sidebar";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { requireSession } from "@/lib/auth/current";
+import { ALERT_STATUSES, formatPhone } from "@/lib/whatsapp";
 
 export const metadata: Metadata = { title: "Painel — Achadinhos Bot" };
 
@@ -33,7 +35,13 @@ function SubscriptionBadge({
 
 export default async function PainelLayout({ children }: { children: ReactNode }) {
   const { user } = await requireSession();
-  const subscription = await getCurrentSubscription(user.tenantId);
+  const [subscription, brokenChannels] = await Promise.all([
+    getCurrentSubscription(user.tenantId),
+    forTenant(user.tenantId).channel.findMany({
+      where: { type: "WHATSAPP", status: { in: ALERT_STATUSES } },
+      select: { id: true, externalId: true, statusReason: true },
+    }),
+  ]);
 
   return (
     <SidebarProvider>
@@ -47,6 +55,21 @@ export default async function PainelLayout({ children }: { children: ReactNode }
             </Link>
           </div>
         </header>
+        {brokenChannels.length > 0 ? (
+          <div className="grid gap-2 px-4 pt-4 md:px-6">
+            {brokenChannels.map((channel) => (
+              <Alert key={channel.id} variant="destructive" role="alert">
+                <AlertDescription>
+                  O número {formatPhone(channel.externalId)} foi desconectado.{" "}
+                  {channel.statusReason ? `${channel.statusReason} ` : ""}
+                  <Link href="/painel/canais" className="font-medium underline underline-offset-4">
+                    Reconectar
+                  </Link>
+                </AlertDescription>
+              </Alert>
+            ))}
+          </div>
+        ) : null}
         <div className="flex-1 p-4 md:p-6">{children}</div>
       </SidebarInset>
     </SidebarProvider>

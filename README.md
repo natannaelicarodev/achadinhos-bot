@@ -2,7 +2,7 @@
 
 Bot de achadinhos/ofertas com painel web (Next.js) e worker (filas BullMQ, WhatsApp via Baileys, Telegram via grammY).
 
-> **Status:** fase 1 — contas, login, multi-tenant e painel base.
+> **Status:** fase 2 — conexão com WhatsApp (QR Code), grupos e envio de teste.
 
 ## Estrutura
 
@@ -62,7 +62,10 @@ cd achadinhos-bot
 4. No serviço **Postgres** → aba **Variables** → copie `DATABASE_PUBLIC_URL`.
 5. No serviço **Redis** → aba **Variables** → copie `REDIS_PUBLIC_URL`.
 
-> Use as URLs **públicas** (`*.proxy.rlwy.net`). As internas (`*.railway.internal`) só funcionam dentro do Railway.
+> Use as URLs **públicas** (`DATABASE_PUBLIC_URL` e `REDIS_PUBLIC_URL`). As internas (`*.railway.internal`) só funcionam dentro do Railway.
+> Se a variável pública não existir: no serviço → **Settings** → **Networking** → **Add Public Access**.
+>
+> Use projetos separados no Railway para desenvolvimento e produção (ex.: `achadinhos-dev`), para o worker do seu PC nunca abrir os números de produção.
 
 ### 5. Configurar o `.env`
 
@@ -78,6 +81,7 @@ Abra o `.env` e:
    node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
    ```
    Guarde essa chave: sem ela, as credenciais salvas não abrem mais.
+   Gere **outra** chave com o mesmo comando para `WHATSAPP_SESSION_KEY` (sessões do WhatsApp).
 3. E-mail: deixe `SMTP_HOST` vazio no dev — o link de "esqueci minha senha" aparece no terminal.
 
 ### 6. Instalar dependências
@@ -108,7 +112,7 @@ pnpm dev
 Sobe `web` e `worker` em paralelo:
 
 - Web: http://localhost:3000 (crie uma conta em http://localhost:3000/cadastro)
-- Worker: logs no terminal (`[worker] iniciado ...`)
+- Worker: logs no terminal (`[worker] iniciado ...`). Ele precisa de `DATABASE_URL`, `REDIS_URL` e `WHATSAPP_SESSION_KEY`; se faltar algo, mostra qual variável corrigir.
 
 Para parar: `Ctrl + C`.
 
