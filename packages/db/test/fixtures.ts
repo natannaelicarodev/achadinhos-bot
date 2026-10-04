@@ -54,7 +54,15 @@ export async function seedTenant(prisma: PrismaClient, name: string) {
     { client: prisma, key: TEST_KEY },
   );
 
-  return { tenant, user, subscription, channel, group, offer, post, click, conversion, credential };
+  const blob = { ciphertext: new Uint8Array([1]), iv: new Uint8Array(12), authTag: new Uint8Array(16) };
+  const waSession = await prisma.whatsAppSession.create({
+    data: { tenantId: tenant.id, channelId: channel.id, ...blob },
+  });
+  const waKey = await prisma.whatsAppSessionKey.create({
+    data: { tenantId: tenant.id, channelId: channel.id, type: "pre-key", keyId: "1", ...blob },
+  });
+
+  return { tenant, user, subscription, channel, group, offer, post, click, conversion, credential, waSession, waKey };
 }
 
 export type SeededTenant = Awaited<ReturnType<typeof seedTenant>>;

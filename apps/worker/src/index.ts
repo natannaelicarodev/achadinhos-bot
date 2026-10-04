@@ -1,18 +1,54 @@
-import { env } from "./env";
+import { randomBytes } from "node:crypto";
+import { hostname } from "node:os";
+import { getPrisma } from "@achadinhos/db";
+import { pino } from "pino";
+import { loadEnv } from "./env";
+import { startWhatsappQueueWorker } from "./queues/whatsapp";
+import { createRedis } from "./redis";
+import { ChannelLocks } from "./whatsapp/lock";
+import { WhatsAppManager } from "./whatsapp/manager";
+import { redisTestSendHistory } from "./whatsapp/rate-limit";
 
-// Fase 0: stub. Sem conexão real com Redis/BullMQ, WhatsApp (Baileys) ou Telegram (grammY).
-console.log(`[worker] iniciado (NODE_ENV=${env.NODE_ENV})`);
-console.log(`[worker] DATABASE_URL ${env.DATABASE_URL ? "definida" : "ausente"}`);
-console.log(`[worker] REDIS_URL ${env.REDIS_URL ? "definida" : "ausente"}`);
+const env = loadEnv();
+const logger = pino({ level: env.LOG_LEVEL });
 
-// Mantém o processo vivo até receber sinal de parada.
-const heartbeat = setInterval(() => {}, 60_000);
+const prisma = getPrisma();
+const redis = createRedis(env.REDIS_URL);
+const owner = `${hostname()}:${process.pid}:${randomBytes(4).toString("hex")}`;
 
-function shutdown(signal: string): void {
-  console.log(`[worker] ${signal} recebido, encerrando`);
-  clearInterval(heartbeat);
+const manager = new WhatsAppManager({
+  prisma,
+  redis,
+  locks: new ChannelLocks(redis, owner),
+  sessionKey: env.WHATSAPP_SESSION_KEY,
+  logger,
+});
+
+// Antes de ouvir a fila, para não sobrescrever o status de um "conectar" novo.
+const interrupted = await manager.resetInterruptedPairings();
+if (interrupted > 0) logger.info({ interrupted }, "[worker] pareamentos interrompidos marcados como desconectados");
+
+const queueWorker = startWhatsappQueueWorker(createRedis(env.REDIS_URL), {
+  prisma,
+  manager,
+  history: redisTestSendHistory(redis),
+  logger,
+});
+
+logger.info({ owner, env: env.NODE_ENV }, "[worker] iniciado");
+manager.startAll().catch((err: unknown) => logger.error({ err }, "[worker] falha ao reconectar números"));
+
+let stopping = false;
+async function shutdown(signal: string): Promise<void> {
+  if (stopping) return;
+  stopping = true;
+  logger.info(`[worker] ${signal} recebido, encerrando`);
+  await queueWorker.close().catch(() => undefined);
+  await manager.stopAll().catch(() => undefined);
+  await redis.quit().catch(() => undefined);
+  await prisma.$disconnect().catch(() => undefined);
   process.exit(0);
 }
 
-process.on("SIGINT", () => shutdown("SIGINT"));
-process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => void shutdown("SIGINT"));
+process.on("SIGTERM", () => void shutdown("SIGTERM"));

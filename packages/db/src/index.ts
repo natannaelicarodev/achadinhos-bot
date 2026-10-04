@@ -13,6 +13,13 @@ export {
 } from "./store-credentials";
 export { startTrial, getCurrentSubscription, markExpiredTrialsPastDue, TRIAL_DAYS } from "./subscription";
 export { PLANS, TRIAL_PLAN_CODE, type PlanSeed } from "./plans";
+export {
+  PlanLimitError,
+  getWhatsappUsage,
+  assertCanAddWhatsappNumber,
+  assertChannelWithinWhatsappLimit,
+  assertCanEnableGroupPosting,
+} from "./limits";
 export { PrismaClient, Prisma } from "./generated/prisma/client";
 export * from "./generated/prisma/enums";
 export type {
@@ -29,4 +36,6 @@ export type {
   Click,
   Conversion,
   StoreCredential,
+  WhatsAppSession,
+  WhatsAppSessionKey,
 } from "./generated/prisma/client";

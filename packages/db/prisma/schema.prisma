@@ -42,7 +42,9 @@ enum ChannelType {
 enum ChannelStatus {
   DISCONNECTED
   CONNECTING
+  QR_PENDING // aguardando leitura do QR Code
   CONNECTED
+  LOGGED_OUT // sessão encerrada no celular: precisa de novo QR
   ERROR
 }
 
@@ -93,11 +95,11 @@ model Plan {
 }
 
 model Tenant {
-  id               String            @id @default(cuid())
+  id               String               @id @default(cuid())
   name             String
-  slug             String            @unique
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  slug             String               @unique
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
   users            User[]
   subscriptions    Subscription[]
   channels         Channel[]
@@ -107,6 +109,8 @@ model Tenant {
   clicks           Click[]
   conversions      Conversion[]
   storeCredentials StoreCredential[]
+  whatsAppSessions WhatsAppSession[]
+  whatsAppKeys     WhatsAppSessionKey[]
 }
 
 // ---------- Auth ----------
@@ -169,37 +173,85 @@ model Subscription {
 }
 
 model Channel {
-  id         String        @id @default(cuid())
-  tenantId   String
-  tenant     Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  type       ChannelType
-  name       String
-  status     ChannelStatus @default(DISCONNECTED)
-  externalId String? // nº do WhatsApp ou @username do bot Telegram
-  createdAt  DateTime      @default(now())
-  updatedAt  DateTime      @updatedAt
-  groups     Group[]
+  id              String               @id @default(cuid())
+  tenantId        String
+  tenant          Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  type            ChannelType
+  name            String
+  status          ChannelStatus        @default(DISCONNECTED)
+  statusReason    String? // motivo em pt-BR exibido no painel (ex.: "Sessão encerrada no celular")
+  externalId      String? // nº do WhatsApp ou @username do bot Telegram
+  lastConnectedAt DateTime?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  groups          Group[]
+  whatsAppSession WhatsAppSession?
+  whatsAppKeys    WhatsAppSessionKey[]
 
   @@unique([id, tenantId])
+  @@index([tenantId])
+  @@index([type, status])
+}
+
+// Sessão Baileys de um número: credenciais (creds) criptografadas.
+// Nada de sessão em disco: o Railway apaga arquivos a cada deploy.
+model WhatsAppSession {
+  channelId  String   @id
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  channel    Channel  @relation(fields: [channelId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  ciphertext Bytes // AES-256-GCM do JSON (BufferJSON) das creds
+  iv         Bytes
+  authTag    Bytes
+  keyVersion Int      @default(1)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([channelId, tenantId]) // exigido pela relação 1:1 com FK composta
+  @@index([tenantId])
+}
+
+// Chaves Signal do número (pre-key, session, sender-key, lid-mapping, ...).
+// Uma linha por chave: o Baileys atualiza poucas por vez, a cada mensagem.
+model WhatsAppSessionKey {
+  channelId  String
+  type       String // categoria do SignalDataTypeMap
+  keyId      String
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  channel    Channel  @relation(fields: [channelId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  ciphertext Bytes
+  iv         Bytes
+  authTag    Bytes
+  keyVersion Int      @default(1)
+  updatedAt  DateTime @updatedAt
+
+  @@id([channelId, type, keyId])
   @@index([tenantId])
 }
 
 model Group {
-  id         String   @id @default(cuid())
-  tenantId   String
-  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  channelId  String
-  channel    Channel  @relation(fields: [channelId, tenantId], references: [id, tenantId], onDelete: Cascade)
-  externalId String // JID do WhatsApp ou chat_id do Telegram
-  name       String
-  active     Boolean  @default(true)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  posts      Post[]
+  id                String   @id @default(cuid())
+  tenantId          String
+  tenant            Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  channelId         String
+  channel           Channel  @relation(fields: [channelId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  externalId        String // JID do WhatsApp ou chat_id do Telegram
+  name              String
+  active            Boolean  @default(true) // o número ainda participa do grupo
+  postingEnabled    Boolean  @default(false) // marcado pelo usuário para receber posts
+  canSend           Boolean  @default(true) // false se "só admins enviam" e o número não é admin
+  isAdmin           Boolean  @default(false) // o número é admin do grupo (filtro padrão do painel)
+  participantsCount Int?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  posts             Post[]
 
   @@unique([id, tenantId])
   @@unique([channelId, externalId])
   @@index([tenantId])
+  @@index([tenantId, postingEnabled])
+  @@index([channelId, isAdmin])
 }
 
 model Offer {
