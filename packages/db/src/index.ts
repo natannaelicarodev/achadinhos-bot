@@ -1,20 +1,32 @@
-import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient } from "./generated/prisma/client";
-
-// Singleton: evita abrir várias conexões no hot reload do Next.js / tsx watch.
-const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
-
-function createClient(): PrismaClient {
-  const connectionString = process.env.DATABASE_URL;
-  if (!connectionString) {
-    throw new Error("DATABASE_URL não definida. Copie .env.example para .env.");
-  }
-  return new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
-}
-
-export function getPrisma(): PrismaClient {
-  globalForPrisma.prisma ??= createClient();
-  return globalForPrisma.prisma;
-}
-
-export { PrismaClient };
+export { createPrismaClient, getPrisma } from "./client";
+export { forTenant, TenantScopeError, TENANT_SCOPED_MODELS, type TenantDb } from "./tenant";
+export { encrypt, decrypt, parseEncryptionKey, type EncryptedPayload } from "./crypto";
+export {
+  saveStoreCredential,
+  getStoreCredentialSecrets,
+  listStoreCredentials,
+  deleteStoreCredential,
+  getStoreCredentialsKey,
+  maskSecret,
+  CURRENT_KEY_VERSION,
+  type StoreSecrets,
+} from "./store-credentials";
+export { startTrial, getCurrentSubscription, markExpiredTrialsPastDue, TRIAL_DAYS } from "./subscription";
+export { PLANS, TRIAL_PLAN_CODE, type PlanSeed } from "./plans";
+export { PrismaClient, Prisma } from "./generated/prisma/client";
+export * from "./generated/prisma/enums";
+export type {
+  Plan,
+  Tenant,
+  User,
+  Session,
+  PasswordResetToken,
+  Subscription,
+  Channel,
+  Group,
+  Offer,
+  Post,
+  Click,
+  Conversion,
+  StoreCredential,
+} from "./generated/prisma/client";

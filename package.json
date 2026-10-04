@@ -14,7 +14,10 @@
     "test": "pnpm -r --if-present run test",
     "lint": "pnpm -r --if-present run lint",
     "db:generate": "pnpm --filter @achadinhos/db run generate",
-    "db:migrate": "pnpm --filter @achadinhos/db run migrate"
+    "db:migrate": "pnpm --filter @achadinhos/db run migrate",
+    "db:deploy": "pnpm --filter @achadinhos/db run migrate:deploy",
+    "db:seed": "pnpm --filter @achadinhos/db run seed",
+    "db:studio": "pnpm --filter @achadinhos/db run studio"
   },
   "devDependencies": {
     "@types/node": "^24.19.1",
