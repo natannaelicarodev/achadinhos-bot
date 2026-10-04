@@ -1,0 +1,12 @@
+// Schema do banco (PostgreSQL).
+// Fase 0: sem models. Models (Tenant, Offer, ...) entram na fase 1.
+// A URL de conexão fica em prisma.config.ts (Prisma 7).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}

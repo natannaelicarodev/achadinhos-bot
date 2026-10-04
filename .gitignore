@@ -1,0 +1,42 @@
+# dependências
+node_modules/
+.pnpm-store/
+
+# variáveis de ambiente (nunca commitar segredos)
+.env
+.env.local
+.env.*.local
+
+# next.js
+.next/
+out/
+next-env.d.ts
+
+# saída de build
+dist/
+build/
+*.tsbuildinfo
+
+# prisma client gerado
+packages/db/src/generated/
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# sistema operacional
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# sessão do Baileys (nunca commitar sessão do WhatsApp)
+apps/worker/auth_sessions/
+apps/worker/*.session
+
+# cache
+.turbo/
