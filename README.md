@@ -2,7 +2,7 @@
 
 Bot de achadinhos/ofertas com painel web (Next.js) e worker (filas BullMQ, WhatsApp via Baileys).
 
-> **Status:** fase 4b — credenciais de afiliado de cada cliente, conversão de links (Shopee, Mercado Livre, Amazon, Shein), tela Divulgar link e mensagem pronta. Lançamento só com WhatsApp.
+> **Status:** fase 4c — extensão do Chrome (baixada pelo painel, menu Extensão) que gera o link meli.la e lê o preço real do Mercado Livre automaticamente. Lançamento só com WhatsApp.
 
 ## Estrutura
 

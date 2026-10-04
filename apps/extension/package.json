@@ -1,23 +1,25 @@
 {
-  "name": "@achadinhos/stores",
+  "name": "@achadinhos/extension",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
-    "./message": "./src/message.ts",
-    "./browser": "./src/browser.ts"
+    "./protocol": "./src/protocol.ts"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsx build.ts",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run"
   },
   "dependencies": {
-    "@achadinhos/db": "workspace:*",
+    "@achadinhos/stores": "workspace:^",
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@types/chrome": "^0.3.4",
+    "esbuild": "^0.28.2",
+    "fflate": "^0.8.2",
+    "tsx": "^4.23.15",
     "vitest": "^5.0.3"
   }
 }

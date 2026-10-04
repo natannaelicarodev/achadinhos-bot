@@ -7,7 +7,7 @@ const rootEnv = fileURLToPath(new URL("../../.env", import.meta.url));
 if (existsSync(rootEnv)) process.loadEnvFile(rootEnv);
 
 const nextConfig: NextConfig = {
-  transpilePackages: ["@achadinhos/db", "@achadinhos/jobs", "@achadinhos/stores"],
+  transpilePackages: ["@achadinhos/db", "@achadinhos/jobs", "@achadinhos/stores", "@achadinhos/extension"],
   // Indicador do modo dev no canto direito (no esquerdo cobre o "Sair" da sidebar).
   devIndicators: { position: "bottom-right" },
 };
