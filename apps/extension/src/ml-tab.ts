@@ -40,7 +40,11 @@ function waitForTab(tabId: number): Promise<void> {
   });
 }
 
+/** Aba "emprestada" durante uma sequência de pedidos (holdMlTab): evita abrir uma aba por pedido. */
+let heldTabId: number | undefined;
+
 async function withMlTab<T>(task: (tabId: number) => Promise<T>): Promise<T> {
+  if (heldTabId !== undefined) return task(heldTabId);
   const [existing] = await chrome.tabs.query({ url: ML_TAB_PATTERN, status: "complete" });
   if (existing?.id !== undefined) return task(existing.id);
 
@@ -52,6 +56,19 @@ async function withMlTab<T>(task: (tabId: number) => Promise<T>): Promise<T> {
   } finally {
     await chrome.tabs.remove(created.id).catch(() => undefined);
   }
+}
+
+/** Roda vários pedidos na MESMA aba do ML (abre uma em segundo plano só se não houver). */
+export async function holdMlTab<T>(task: () => Promise<T>): Promise<T> {
+  if (heldTabId !== undefined) return task();
+  return withMlTab(async (tabId) => {
+    heldTabId = tabId;
+    try {
+      return await task();
+    } finally {
+      heldTabId = undefined;
+    }
+  });
 }
 
 /**

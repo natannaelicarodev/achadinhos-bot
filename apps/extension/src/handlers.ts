@@ -1,6 +1,7 @@
 // Lógica dos pedidos (testável sem Chrome: recebe fetch por parâmetro).
 import { EXTENSION_VERSION, parseRequest, type ExtensionResult, type RequestPayload, type RequestType, type ResponseMap } from "./protocol";
 import { createMeliLink, fetchCsrfToken, MlError, readMlProductInfo } from "./ml";
+import { searchHub } from "./ml-hub";
 
 type Fetch = typeof fetch;
 
@@ -87,6 +88,22 @@ export async function handleRequest(
       }
       case "ml.diagnose":
         return { ok: true, data: await diagnose(deps.fetch, parsed.payload as RequestPayload<"ml.diagnose">) };
+      case "ml.hubSearch": {
+        const params = parsed.payload as RequestPayload<"ml.hubSearch">;
+        const run = async (force: boolean) => searchHub(deps.fetch, params, await csrfToken(deps.fetch, now(), force));
+        let items;
+        try {
+          items = await run(false);
+        } catch (error) {
+          // Token vencido: busca um novo e tenta mais uma vez.
+          if (!(error instanceof MlError) || !/recusou/.test(error.message)) throw error;
+          items = await run(true);
+        }
+        return { ok: true, data: { items, hasMore: items.length > 0 } };
+      }
+      default:
+        // vitrine.*: tratados no service worker (precisam de chrome.storage e da origem do painel).
+        return { ok: false, error: "Pedido desconhecido." };
     }
   } catch (error) {
     return { ok: false, error: message(error) };
