@@ -318,6 +318,7 @@ model Offer {
   clicks             Click[]
   conversions        Conversion[]
   messageText        String? // mensagem pronta (template já preenchido) na hora do "Enviar para meus grupos"
+  headline           String? // headline usada na mensagem (vai para os posts: não repetir no grupo)
   sendRequestedAt    DateTime? // pedido de envio ("Enviar para meus grupos")
   sendQueuedAt       DateTime? // quando o pedido virou posts na fila (não processa de novo)
   // Produto do catálogo central de onde a oferta veio ("Divulgar este produto").
@@ -363,6 +364,7 @@ model CatalogProduct {
   rating             Float? // 0 a 5
   soldCount          Int?
   score              Float           @default(0) // ranking: vendas, nota, desconto, comissão
+  headlineKey        String? // tipo de produto da headline ("type:...", "category:..." ou "generic"), calculado ao minerar
   active             Boolean         @default(true)
   firstSeenAt        DateTime        @default(now())
   lastSeenAt         DateTime
@@ -376,6 +378,7 @@ model CatalogProduct {
   @@index([active, category, score(sort: Desc)])
   @@index([active, store, score(sort: Desc)])
   @@index([store, lastSeenAt])
+  @@index([headlineKey])
 }
 
 // Favorito do catálogo: por tenant.
@@ -434,6 +437,7 @@ model Post {
   store             Store?
   productExternalId String? // id do produto na loja (não repetir no grupo)
   messageText       String? // texto final enviado
+  headline          String? // headline da mensagem (não repetir nas últimas 10 do grupo)
   affiliateUrl      String? // link usado no texto (Shopee: com subIds [tenant, grupo])
   priceCents        Int?
   imageUrl          String?
@@ -523,11 +527,13 @@ model StoreCredential {
 // Modelo da mensagem de divulgação do tenant (um por tenant).
 // Variáveis: {headline} {titulo} {preco_de} {preco_por} {desconto} {link}
 model MessageTemplate {
-  tenantId  String   @id
-  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  body      String
-  headline  String // valor padrão de {headline} (editável em cada mensagem)
-  updatedAt DateTime @updatedAt
+  tenantId        String   @id
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  body            String
+  headline        String // valor padrão de {headline} (editável em cada mensagem)
+  autoHeadlines   Boolean  @default(true) // headline automática pelo tipo do produto (desligada = usa a fixa)
+  customHeadlines String[] @default([]) // headlines próprias do cliente (entram no sorteio)
+  updatedAt       DateTime @updatedAt
 }
 
 // Piloto automático do tenant (um por tenant). Horários no fuso America/Sao_Paulo.

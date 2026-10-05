@@ -58,11 +58,14 @@ function waitForTab(tabId: number): Promise<void> {
 /** Aba "emprestada" durante uma sequência de pedidos (holdStoreTab): evita abrir uma aba por pedido. */
 const heldTabs = new Map<StoreSite, number>();
 
-async function withStoreTab<T>(site: StoreSite, task: (tabId: number) => Promise<T>): Promise<T> {
+/** `fresh`: ignora abas já abertas e abre uma nova (página recém-carregada = sessão nova). */
+async function withStoreTab<T>(site: StoreSite, task: (tabId: number) => Promise<T>, options: { fresh?: boolean } = {}): Promise<T> {
   const held = heldTabs.get(site);
   if (held !== undefined) return task(held);
-  const [existing] = await chrome.tabs.query({ url: site.tabPattern, status: "complete" });
-  if (existing?.id !== undefined) return task(existing.id);
+  if (!options.fresh) {
+    const [existing] = await chrome.tabs.query({ url: site.tabPattern, status: "complete" });
+    if (existing?.id !== undefined) return task(existing.id);
+  }
 
   const created = await chrome.tabs.create({ url: site.openUrl, active: false });
   if (created.id === undefined) throw new Error("Não foi possível abrir a loja.");
@@ -74,17 +77,24 @@ async function withStoreTab<T>(site: StoreSite, task: (tabId: number) => Promise
   }
 }
 
-/** Roda vários pedidos na MESMA aba da loja (abre uma em segundo plano só se não houver). */
-export async function holdStoreTab<T>(site: StoreSite, task: () => Promise<T>): Promise<T> {
+/**
+ * Roda vários pedidos na MESMA aba da loja (abre uma em segundo plano só se não houver).
+ * `fresh`: sempre abre uma aba nova em segundo plano (e fecha no fim).
+ */
+export async function holdStoreTab<T>(site: StoreSite, task: () => Promise<T>, options: { fresh?: boolean } = {}): Promise<T> {
   if (heldTabs.has(site)) return task();
-  return withStoreTab(site, async (tabId) => {
-    heldTabs.set(site, tabId);
-    try {
-      return await task();
-    } finally {
-      heldTabs.delete(site);
-    }
-  });
+  return withStoreTab(
+    site,
+    async (tabId) => {
+      heldTabs.set(site, tabId);
+      try {
+        return await task();
+      } finally {
+        heldTabs.delete(site);
+      }
+    },
+    options,
+  );
 }
 
 /**

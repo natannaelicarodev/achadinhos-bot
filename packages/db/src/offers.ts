@@ -14,6 +14,8 @@ export interface OfferForSending {
   originalPriceCents: number | null;
   commissionCents?: number | null;
   messageText: string;
+  /** Headline usada na mensagem (vai para os posts: não repetir no grupo). */
+  headline?: string | null;
 }
 
 /**
@@ -40,6 +42,7 @@ export async function saveOfferForSending(
     originalPriceCents: input.originalPriceCents,
     commissionCents: input.commissionCents ?? null,
     messageText: input.messageText,
+    headline: input.headline ?? null,
     status: "ACTIVE" as const,
     sendRequestedAt: now,
     sendQueuedAt: null, // novo pedido: a fila cria os posts de novo

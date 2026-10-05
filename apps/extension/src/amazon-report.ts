@@ -183,7 +183,10 @@ export async function readAmazonReport(
   }
   const response = await http(amazonReportUrl(s.storeId, rangeDays, now), { headers: associatesHeaders(s) });
   if (response.status === 401 || response.status === 403 || /\/ap\/signin/.test(response.url)) {
-    throw new AmazonError("Entre na sua conta de Associados da Amazon neste Chrome para ler o relatório.", response.status);
+    throw new AmazonError(
+      `A Amazon recusou a leitura do relatório (HTTP ${response.status}). Entre na sua conta de Associados da Amazon neste Chrome.`,
+      response.status,
+    );
   }
   if (!response.ok) throw new AmazonError(`A Amazon não abriu o relatório (HTTP ${response.status}).`, response.status);
   const text = await response.text();

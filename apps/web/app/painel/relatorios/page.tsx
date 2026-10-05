@@ -5,6 +5,8 @@ import { PageHeader } from "@/components/painel/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireSession } from "@/lib/auth/current";
 import { formatBRL } from "@/lib/catalog";
+import { HeadlineReport } from "@/components/relatorios/headline-report";
+import { isSystemAdmin } from "@/lib/ml-vitrine";
 
 export const metadata: Metadata = { title: "Relatórios — Achadinhos Bot" };
 
@@ -208,6 +210,7 @@ export default async function RelatoriosPage() {
             </Card>
           );
         })}
+        {isSystemAdmin(user.email) ? <HeadlineReport /> : null}
       </div>
     </>
   );

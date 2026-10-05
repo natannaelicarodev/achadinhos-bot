@@ -7,9 +7,12 @@ import {
   NO_SENDING_MESSAGE,
   planAllowsSending,
   saveOfferForSending,
+  type CatalogCategory,
 } from "@achadinhos/db";
 import {
   amazonSecretsSchema,
+  chooseHeadline,
+  recentGroupHeadlines,
   canonicalAmazonShortLink,
   isAmazonShortLink,
   isOwnAmazonLink,
@@ -65,6 +68,10 @@ export interface SharePreview {
   /** Plano com envio aos grupos? (o "Catálogo" só copia a mensagem) */
   canSendToGroups: boolean;
   settings: MessageSettings;
+  /** Headline sugerida (dicionário pelo tipo do produto ou a do cliente). */
+  headline: string;
+  /** Categoria do catálogo (fallback da headline); null em link colado. */
+  category: CatalogCategory | null;
 }
 
 export type PreviewResult = { ok: true; preview: SharePreview } | { ok: false; error: string };
@@ -106,7 +113,7 @@ function shortLinkProductRef(shortLink: URL, landing: URL): ProductRef {
 
 function buildPreview(
   base: Pick<SharePreview, "product" | "catalogProductId" | "settings"> &
-    Partial<Pick<SharePreview, "shortLink" | "notice" | "mlTag" | "amazonTag">>,
+    Partial<Pick<SharePreview, "shortLink" | "notice" | "mlTag" | "amazonTag" | "category">>,
   info: (PageProductInfo & { discountPct?: number | null }) | null,
   link: LinkResult,
   needsManualInfo: boolean,
@@ -117,6 +124,8 @@ function buildPreview(
     notice: base.notice ?? null,
     mlTag: base.mlTag ?? null,
     amazonTag: base.amazonTag ?? null,
+    category: base.category ?? null,
+    headline: base.settings.headline, // trocada pela sugerida em withSendingPlan
     canSendToGroups: true,
     info: {
       title: info?.title ?? null,
@@ -251,6 +260,7 @@ async function previewCatalogProduct(catalogProductId: string): Promise<PreviewR
         product,
         catalogProductId: row.id,
         settings,
+        category: row.category,
         ...(isMl ? { notice: ML_PREFER_SHORT_LINK, mlTag: mlTags?.mattWord ?? null } : {}),
         ...(isAmazon && amazon ? { notice: AMAZON_PREFER_SHORT_LINK, amazonTag: amazon.tag } : {}),
       },
@@ -273,10 +283,66 @@ async function tenantCanSend(tenantId: string): Promise<boolean> {
   return Boolean(subscription && planAllowsSending(subscription.plan));
 }
 
+/** Grupos marcados para receber posts (as headlines recentes deles não se repetem). */
+async function postingGroupIds(tenantId: string): Promise<string[]> {
+  const groups = await forTenant(tenantId).group.findMany({ where: { postingEnabled: true }, select: { id: true } });
+  return groups.map((g) => g.id);
+}
+
+interface HeadlineInput {
+  title: string;
+  catalogProductId: string | null;
+  discountPct: number | null;
+  exclude?: string[];
+}
+
+/** Headline pelo tipo do produto (pré-calculado no catálogo; senão pelo título lido), sem repetir nos grupos. */
+async function suggestHeadline(tenantId: string, settings: MessageSettings, input: HeadlineInput): Promise<string> {
+  const row = input.catalogProductId
+    ? await forTenant(tenantId).catalogProduct.findUnique({
+        where: { id: input.catalogProductId },
+        select: { category: true, headlineKey: true },
+      })
+    : null;
+  const recentByGroup = await recentGroupHeadlines(tenantId, await postingGroupIds(tenantId));
+  return chooseHeadline(
+    settings,
+    { title: input.title, category: row?.category ?? null, discountPct: input.discountPct, headlineKey: row?.headlineKey ?? null },
+    { recentByGroup, exclude: input.exclude },
+  );
+}
+
 async function withSendingPlan(result: PreviewResult): Promise<PreviewResult> {
   if (!result.ok) return result;
   const { user } = await requireSession();
-  return { ok: true, preview: { ...result.preview, canSendToGroups: await tenantCanSend(user.tenantId) } };
+  const { preview } = result;
+  const headline = preview.info.title
+    ? await suggestHeadline(user.tenantId, preview.settings, {
+        title: preview.info.title,
+        catalogProductId: preview.catalogProductId,
+        discountPct: preview.info.discountPct,
+      })
+    : preview.settings.headline;
+  return { ok: true, preview: { ...preview, headline, canSendToGroups: await tenantCanSend(user.tenantId) } };
+}
+
+const anotherHeadlineSchema = z.object({
+  title: z.string().trim().min(2).max(300),
+  catalogProductId: z.string().min(1).max(100).nullable(),
+  discountPct: z.number().int().min(0).max(100).nullable(),
+  seen: z.array(z.string().max(200)).max(200),
+});
+
+/** "Quero outra headline": sorteia outra que a pessoa ainda não viu. */
+export async function anotherHeadlineAction(
+  input: z.input<typeof anotherHeadlineSchema>,
+): Promise<{ ok: true; headline: string } | { ok: false; error: string }> {
+  const { user } = await requireSession();
+  const parsed = anotherHeadlineSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Informe o título do produto." };
+  const settings = await getMessageSettings(user.tenantId);
+  const headline = await suggestHeadline(user.tenantId, settings, { ...parsed.data, exclude: parsed.data.seen });
+  return { ok: true, headline };
 }
 
 /** "Divulgar link": identifica a loja, converte com a credencial do cliente e lê os dados do produto. */
@@ -407,12 +473,13 @@ export async function sendToGroupsAction(input: z.input<typeof sendSchema>): Pro
   }
 
   const settings = await getMessageSettings(user.tenantId);
+  const headline = data.headline || settings.headline;
   const originalPriceCents = data.originalPriceCents && data.originalPriceCents > data.priceCents ? data.originalPriceCents : null;
   const text = composeMessage(
     settings,
     { title: data.title, priceCents: data.priceCents, originalPriceCents, discountPct: null },
     affiliateUrl,
-    data.headline || settings.headline,
+    headline,
   );
   await saveOfferForSending(user.tenantId, {
     // meli.la colado pode ser de produto fora do catálogo; link curto da Amazon é do produto conferido.
@@ -426,6 +493,7 @@ export async function sendToGroupsAction(input: z.input<typeof sendSchema>): Pro
     priceCents: data.priceCents,
     originalPriceCents,
     messageText: text,
+    headline,
   });
   revalidatePath("/painel/ofertas");
   return {

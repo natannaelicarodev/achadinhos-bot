@@ -487,3 +487,70 @@ describe("fila de envio", () => {
     expect(socket.sent[0]!.text).toContain("tag=cliente-20");
   });
 });
+
+describe("headlines no piloto", () => {
+  it("usa a headline do tipo do produto e não repete nas 10 últimas mensagens de cada grupo", async () => {
+    const { tenant, deps, tdb } = await setup({ settings: { offersPerHour: 6 } });
+    for (let i = 0; i < 14; i++) {
+      await product(`hl-fone-${i}`, {
+        title: `Fone de Ouvido Bluetooth Modelo ${i}`,
+        category: "ELECTRONICS",
+        headlineKey: "type:fone",
+        discountPct: 20,
+        score: 90 - i,
+      });
+    }
+    deps.random = Math.random;
+    for (let i = 0; i < 14; i++) {
+      expect(await pickForTenant(deps, tenant.id, at(i * 10 * MIN))).toMatchObject({ picked: true });
+    }
+    const posts = await tdb.post.findMany({ orderBy: { createdAt: "asc" }, include: { offer: true } });
+    const byGroup = new Map<string, string[]>();
+    for (const p of posts) {
+      expect(p.headline).toBeTruthy();
+      expect(p.messageText).toContain(p.headline!);
+      expect(p.offer.headline).toBe(p.headline);
+      byGroup.set(p.groupId, [...(byGroup.get(p.groupId) ?? []), p.headline!]);
+    }
+    for (const list of byGroup.values()) {
+      expect(list).toHaveLength(14);
+      for (let i = 0; i < list.length; i++) {
+        expect(list.slice(Math.max(0, i - 10), i), `post ${i}`).not.toContain(list[i]);
+      }
+    }
+    // Primeira é do próprio tipo (fone).
+    expect(["SOM DE QUALIDADE EM QUALQUER LUGAR 🎧", "SUA PLAYLIST NUNCA FOI TÃO BOA 🎶", "LIBERDADE SEM FIOS 🎧", "MERGULHE NA SUA MÚSICA 🎵"]).toContain(
+      byGroup.values().next().value![0],
+    );
+  });
+
+  it("headline fixa quando o cliente desliga as automáticas; envio manual leva a headline da oferta para os posts", async () => {
+    const { tenant, deps, tdb } = await setup();
+    await tdb.messageTemplate.create({
+      data: { tenantId: tenant.id, body: "*{headline}*\n{titulo}\n{link}", headline: "MINHA FIXA 🔥", autoHeadlines: false },
+    });
+    await product("hl-fixa", { title: "Fone Bluetooth", headlineKey: "type:fone" });
+    await pickForTenant(deps, tenant.id, T0);
+    const auto = await tdb.post.findMany({ where: { productExternalId: "hl-fixa" } });
+    expect(auto.map((p) => p.headline)).toEqual(["MINHA FIXA 🔥", "MINHA FIXA 🔥"]);
+
+    const offer = await tdb.offer.create({
+      data: {
+        tenantId: tenant.id,
+        store: "SHOPEE",
+        externalId: "hl-manual",
+        title: "Panela",
+        url: "https://shopee.com.br/product/1/hl-manual",
+        affiliateUrl: "https://s.shopee.com.br/x",
+        messageText: "*ESCOLHIDA À MÃO 🍳*",
+        headline: "ESCOLHIDA À MÃO 🍳",
+        status: "ACTIVE",
+        sendRequestedAt: T0,
+      },
+    });
+    await queueManualOffers(deps, T0);
+    const manual = await tdb.post.findMany({ where: { offerId: offer.id } });
+    expect(manual.length).toBe(2);
+    expect(manual.every((p) => p.headline === "ESCOLHIDA À MÃO 🍳")).toBe(true);
+  });
+});

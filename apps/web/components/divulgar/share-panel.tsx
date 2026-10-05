@@ -1,10 +1,15 @@
 "use client";
 
 import { formatBRL, messageVariables, renderMessage } from "@achadinhos/stores/message";
-import { CopyIcon, ImageIcon, Loader2Icon, SendIcon } from "lucide-react";
+import { CopyIcon, ImageIcon, Loader2Icon, RefreshCwIcon, SendIcon } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { confirmExtensionLinkAction, sendToGroupsAction, type SharePreview } from "@/app/painel/divulgar-link/actions";
+import {
+  anotherHeadlineAction,
+  confirmExtensionLinkAction,
+  sendToGroupsAction,
+  type SharePreview,
+} from "@/app/painel/divulgar-link/actions";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,7 +28,11 @@ type Notice = { text: string; tone: "ok" | "warn" | "info"; installLink?: boolea
 
 /** Link de afiliado + mensagem pronta + Copiar / Enviar para meus grupos. */
 export function SharePanel({ preview, editableInfo }: { preview: SharePreview; editableInfo: boolean }) {
-  const [headline, setHeadline] = useState(preview.settings.headline);
+  const [headline, setHeadline] = useState(preview.headline);
+  // Headlines já mostradas: "Quero outra headline" não repete nenhuma.
+  const [seenHeadlines, setSeenHeadlines] = useState<string[]>([preview.headline]);
+  const [headlinePending, startHeadline] = useTransition();
+  const canSwapHeadline = preview.settings.autoHeadlines || preview.settings.customHeadlines.length > 1;
   const [title, setTitle] = useState(preview.info.title ?? "");
   const [price, setPrice] = useState(centsToInput(preview.info.priceCents));
   const [originalPrice, setOriginalPrice] = useState(centsToInput(preview.info.originalPriceCents));
@@ -122,6 +131,28 @@ export function SharePanel({ preview, editableInfo }: { preview: SharePreview; e
 
   const flash = (ok: boolean, text: string) => setFeedback({ ok, text });
 
+  // Desconto da headline: o do catálogo; no "Divulgar link", o dos preços digitados.
+  const discountPct = editableInfo
+    ? originalPriceCents && priceCents && originalPriceCents > priceCents
+      ? Math.round(((originalPriceCents - priceCents) / originalPriceCents) * 100)
+      : null
+    : preview.info.discountPct;
+
+  const anotherHeadline = () =>
+    startHeadline(async () => {
+      const seen = [...seenHeadlines, headline];
+      const result = await anotherHeadlineAction({
+        title: title || preview.info.title || "",
+        catalogProductId: preview.catalogProductId,
+        discountPct,
+        seen,
+      });
+      if (!result.ok) return flash(false, result.error);
+      // Já mostrou todas: recomeça a lista (a próxima volta a variar).
+      setSeenHeadlines(seen.includes(result.headline) ? [result.headline] : [...seen, result.headline]);
+      setHeadline(result.headline);
+    });
+
   return (
     <div className="grid gap-4">
       {/* Link de afiliado */}
@@ -214,14 +245,22 @@ export function SharePanel({ preview, editableInfo }: { preview: SharePreview; e
             Editar modelo
           </Link>
         </div>
-        <Input
-          id="share-headline"
-          value={headline}
-          onChange={(e) => setHeadline(e.target.value)}
-          maxLength={120}
-          aria-label="Chamada da mensagem ({headline})"
-          placeholder="Chamada (ex.: 🔥 ACHADINHO DO DIA)"
-        />
+        <div className="flex flex-wrap gap-2">
+          <Input
+            id="share-headline"
+            value={headline}
+            onChange={(e) => setHeadline(e.target.value)}
+            maxLength={120}
+            aria-label="Chamada da mensagem ({headline})"
+            placeholder="Chamada (ex.: 🔥 ACHADINHO DO DIA)"
+            className="min-w-0 flex-1"
+          />
+          {canSwapHeadline ? (
+            <Button type="button" variant="outline" disabled={headlinePending || title.trim().length < 2} onClick={anotherHeadline}>
+              <RefreshCwIcon className={headlinePending ? "animate-spin" : undefined} /> Quero outra headline
+            </Button>
+          ) : null}
+        </div>
         <WhatsappPreview text={message} imageUrl={imageUrl || null} />
         {priceCents ? (
           <p className="text-xs text-muted-foreground">

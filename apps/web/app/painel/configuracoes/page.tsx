@@ -1,4 +1,5 @@
 import { getCurrentSubscription, getPrisma } from "@achadinhos/db";
+import { captionProvider } from "@achadinhos/stores";
 import Link from "next/link";
 import { TemplateEditor } from "@/components/divulgar/template-editor";
 import { PageHeader } from "@/components/painel/page-header";
@@ -6,6 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getMessageSettings } from "@/lib/affiliate-server";
 import { requireSession } from "@/lib/auth/current";
+
+/** Produto de exemplo da prévia do modelo (o mesmo do editor). */
+const SAMPLE_PRODUCT = { title: "Fone Bluetooth JBL Tune 520BT", discountPct: 43 };
 
 const price = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -114,7 +118,14 @@ export default async function ConfiguracoesPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <TemplateEditor body={settings.body} headline={settings.headline} canEdit={isOwner} />
+            <TemplateEditor
+              body={settings.body}
+              headline={settings.headline}
+              autoHeadlines={settings.autoHeadlines}
+              customHeadlines={settings.customHeadlines}
+              sampleHeadline={captionProvider.pick(captionProvider.classify(SAMPLE_PRODUCT), SAMPLE_PRODUCT)}
+              canEdit={isOwner}
+            />
           </CardContent>
         </Card>
       </div>

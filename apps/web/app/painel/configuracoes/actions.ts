@@ -11,10 +11,15 @@ export type TemplateResult = { ok: true; message: string } | { ok: false; error:
 const templateSchema = z.object({
   body: z.string().max(2000),
   headline: z.string().trim().min(1, "Informe a chamada padrão ({headline}).").max(120),
+  autoHeadlines: z.boolean(),
+  customHeadlines: z
+    .array(z.string().trim().max(120, "Cada headline própria pode ter até 120 caracteres."))
+    .max(50, "No máximo 50 headlines próprias.")
+    .transform((list) => [...new Set(list.filter(Boolean))]),
 });
 
 /** Salva o modelo de mensagem do tenant (só o dono). */
-export async function saveTemplateAction(input: { body: string; headline: string }): Promise<TemplateResult> {
+export async function saveTemplateAction(input: z.input<typeof templateSchema>): Promise<TemplateResult> {
   const { user } = await requireSession();
   if (user.role !== "OWNER") return { ok: false, error: "Só o dono da conta pode alterar o modelo de mensagem." };
   const parsed = templateSchema.safeParse(input);
@@ -22,7 +27,12 @@ export async function saveTemplateAction(input: { body: string; headline: string
   const errors = validateTemplate(parsed.data.body);
   if (errors.length) return { ok: false, error: errors[0]! };
 
-  const data = { body: parsed.data.body.replace(/\r\n/g, "\n"), headline: parsed.data.headline };
+  const data = {
+    body: parsed.data.body.replace(/\r\n/g, "\n"),
+    headline: parsed.data.headline,
+    autoHeadlines: parsed.data.autoHeadlines,
+    customHeadlines: parsed.data.customHeadlines,
+  };
   await forTenant(user.tenantId).messageTemplate.upsert({
     where: { tenantId: user.tenantId },
     create: { tenantId: user.tenantId, ...data },

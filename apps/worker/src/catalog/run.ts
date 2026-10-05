@@ -7,6 +7,7 @@ import {
   type MinedProduct,
   type PrismaClient,
 } from "@achadinhos/db";
+import { withHeadlineKeys } from "@achadinhos/stores";
 import type { Logger } from "pino";
 import type { CatalogMiner } from "./types";
 
@@ -39,7 +40,7 @@ export async function runCatalogMining(deps: RunDeps) {
     const run = await deps.prisma.catalogMiningRun.create({ data: { store: miner.store, status: "RUNNING" } });
     try {
       const mined = await miner.mine();
-      const saved = await saveMinedProducts(deps.prisma, mined.products, now());
+      const saved = await saveMinedProducts(deps.prisma, withHeadlineKeys(mined.products), now());
 
       // Reconfere quem não apareceu nas listas há mais de 24h.
       const stale = await findStaleCatalogProducts(
@@ -51,7 +52,7 @@ export async function runCatalogMining(deps: RunDeps) {
       const checked = await miner.verify(stale.map((s) => s.externalId));
       const stillThere = [...checked.values()].filter((p): p is MinedProduct => p !== null);
       const gone = [...checked.entries()].filter(([, p]) => p === null).map(([id]) => id);
-      const refreshed = await saveMinedProducts(deps.prisma, stillThere, now());
+      const refreshed = await saveMinedProducts(deps.prisma, withHeadlineKeys(stillThere), now());
       const removed = await deactivateCatalogProducts(deps.prisma, miner.store, gone);
 
       const message =

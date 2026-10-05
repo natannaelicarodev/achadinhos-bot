@@ -2,6 +2,7 @@
 // Comum ao Mercado Livre e à Amazon: chave ML_VITRINE_TOKEN, limite de tamanho, zod,
 // gravação em lote e registro da execução.
 import { getPrisma, saveMinedProducts, type MinedProduct, type Store } from "@achadinhos/db";
+import { withHeadlineKeys } from "@achadinhos/stores";
 import type { z } from "zod";
 import { isValidVitrineToken } from "./ml-vitrine";
 
@@ -26,7 +27,7 @@ export async function receiveVitrine<S extends z.ZodType>(
   }
   if (!parsed.success) return json({ error: "Formato inválido." }, 400);
 
-  const products = options.toProducts(parsed.data);
+  const products = withHeadlineKeys(options.toProducts(parsed.data));
   const prisma = getPrisma();
   const startedAt = new Date();
   try {

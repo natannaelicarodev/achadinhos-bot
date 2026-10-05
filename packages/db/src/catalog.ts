@@ -34,6 +34,10 @@ export interface MinedProduct {
    * Só entra no ranking; não é gravada nem mostrada como "vendidos".
    */
   popularity?: number | null;
+  /** Chave da headline (dicionário do @achadinhos/stores), calculada por quem minera. */
+  headlineKey?: string | null;
+  /** Categoria veio do tipo do produto (dicionário): vale por cima da gravada. */
+  categoryFromType?: boolean;
 }
 
 /** Minúsculas, sem acento e com espaços simples: base da busca do catálogo. */
@@ -87,12 +91,13 @@ function toRow(p: MinedProduct, now: Date) {
     rating: p.rating,
     soldCount: p.soldCount,
     score: computeCatalogScore(p),
+    headlineKey: p.headlineKey ?? null,
     active: true,
     lastSeenAt: now,
   };
 }
 
-/** Produtos por comando SQL (19 parâmetros por linha; o Postgres aceita até 65.535). */
+/** Produtos por comando SQL (20 parâmetros por linha; o Postgres aceita até 65.535). */
 const UPSERT_BATCH = 500;
 const SAVE_TX_TIMEOUT_MS = 120_000;
 
@@ -101,14 +106,14 @@ function upsertStatement(rows: { p: MinedProduct; row: ReturnType<typeof toRow> 
     Prisma.sql`(${randomUUID()}, ${p.store}::"Store", ${p.externalId}, ${row.title}, ${row.searchText}, ${row.imageUrl},
       ${row.productUrl}, ${p.category}::"CatalogCategory", ${row.priceCents}::int, ${row.originalPriceCents}::int,
       ${row.discountPct}::int, ${row.commissionPct}::double precision, ${row.commissionCents}::int,
-      ${row.rating}::double precision, ${row.soldCount}::int, ${row.score}::double precision, true,
+      ${row.rating}::double precision, ${row.soldCount}::int, ${row.score}::double precision, ${row.headlineKey}, true,
       ${now}::timestamp(3), ${now}::timestamp(3))`,
   );
   // Categoria só muda se a atual for OTHER (a primeira classificação vale).
   return Prisma.sql`
     INSERT INTO "CatalogProduct" ("id", "store", "externalId", "title", "searchText", "imageUrl", "productUrl",
       "category", "priceCents", "originalPriceCents", "discountPct", "commissionPct", "commissionCents", "rating",
-      "soldCount", "score", "active", "lastSeenAt", "updatedAt")
+      "soldCount", "score", "headlineKey", "active", "lastSeenAt", "updatedAt")
     VALUES ${Prisma.join(values)}
     ON CONFLICT ("store", "externalId") DO UPDATE SET
       "title" = EXCLUDED."title",
@@ -124,6 +129,7 @@ function upsertStatement(rows: { p: MinedProduct; row: ReturnType<typeof toRow> 
       "rating" = EXCLUDED."rating",
       "soldCount" = EXCLUDED."soldCount",
       "score" = EXCLUDED."score",
+      "headlineKey" = COALESCE(EXCLUDED."headlineKey", "CatalogProduct"."headlineKey"),
       "active" = true,
       "lastSeenAt" = EXCLUDED."lastSeenAt",
       "updatedAt" = EXCLUDED."updatedAt"`;
@@ -164,6 +170,23 @@ export async function saveMinedProducts(client: PrismaClient, products: MinedPro
   const deactivateCount = operations.length;
   for (let i = 0; i < toSave.length; i += UPSERT_BATCH) {
     operations.push(client.$executeRaw(upsertStatement(toSave.slice(i, i + UPSERT_BATCH), now)));
+  }
+  // Categoria do tipo do produto corrige a da loja (ex.: armadilha para barata vinda de Pets -> Casa).
+  const fromType = new Map<string, { store: Store; category: CatalogCategory; externalIds: string[] }>();
+  for (const { p } of toSave) {
+    if (!p.categoryFromType) continue;
+    const key = `${p.store}:${p.category}`;
+    const group = fromType.get(key) ?? { store: p.store, category: p.category, externalIds: [] };
+    group.externalIds.push(p.externalId);
+    fromType.set(key, group);
+  }
+  for (const { store, category, externalIds } of fromType.values()) {
+    operations.push(
+      client.catalogProduct.updateMany({
+        where: { store, externalId: { in: externalIds }, category: { not: category } },
+        data: { category },
+      }),
+    );
   }
   if (operations.length === 0) return { upserted: 0, deactivated: 0 };
 
@@ -272,4 +295,81 @@ export async function getLatestMiningRuns(client: PrismaClient) {
       client.catalogMiningRun.findFirst({ where: { store }, orderBy: { startedAt: "desc" } }),
     ),
   );
+}
+
+// ---------- Headlines (sistema) ----------
+
+/**
+ * Recalcula CatalogProduct.headlineKey com o classificador do dicionário (recebido por
+ * parâmetro: o @achadinhos/db não depende do @achadinhos/stores). `onlyMissing` = só os sem chave.
+ */
+export async function recomputeHeadlineKeys(
+  client: PrismaClient,
+  classify: (product: { title: string; category: CatalogCategory }) => { headlineKey: string; category: CatalogCategory | null },
+  options: { onlyMissing?: boolean; batch?: number } = {},
+): Promise<{ checked: number; updated: number }> {
+  const batch = options.batch ?? 1000;
+  let cursor: string | undefined;
+  let checked = 0;
+  let updated = 0;
+  for (;;) {
+    const rows = await client.catalogProduct.findMany({
+      // Paginação por id > último (cursor do Prisma falha quando a linha anterior sai do filtro).
+      where: { ...(options.onlyMissing ? { headlineKey: null } : {}), ...(cursor ? { id: { gt: cursor } } : {}) },
+      orderBy: { id: "asc" },
+      take: batch,
+      select: { id: true, title: true, category: true, headlineKey: true },
+    });
+    if (rows.length === 0) break;
+    checked += rows.length;
+    cursor = rows[rows.length - 1]!.id;
+    // Agrupa por (chave, categoria) para atualizar em lote. Categoria do tipo corrige a da loja.
+    const changes = new Map<string, { headlineKey: string; category: CatalogCategory; ids: string[] }>();
+    for (const row of rows) {
+      const result = classify(row);
+      const category = result.category ?? row.category;
+      if (result.headlineKey === row.headlineKey && category === row.category) continue;
+      const key = `${result.headlineKey}|${category}`;
+      const change = changes.get(key) ?? { headlineKey: result.headlineKey, category, ids: [] };
+      change.ids.push(row.id);
+      changes.set(key, change);
+    }
+    for (const { headlineKey, category, ids } of changes.values()) {
+      const { count } = await client.catalogProduct.updateMany({ where: { id: { in: ids } }, data: { headlineKey, category } });
+      updated += count;
+    }
+    if (rows.length < batch) break;
+  }
+  return { checked, updated };
+}
+
+export interface HeadlineCoverage {
+  active: number;
+  byType: number;
+  byCategory: number;
+  generic: number;
+  /** Sem chave ainda (minerados antes das headlines; recalcular resolve). */
+  missing: number;
+  genericProducts: { id: string; title: string; store: Store; category: CatalogCategory }[];
+  categoryProducts: { id: string; title: string; store: Store; category: CatalogCategory }[];
+}
+
+/** Relatório do administrador: produtos ativos que caíram na headline genérica ou só na da categoria. */
+export async function headlineCoverage(client: PrismaClient, limit = 200): Promise<HeadlineCoverage> {
+  const select = { id: true, title: true, store: true, category: true } as const;
+  const [active, byType, byCategory, generic, missing, genericProducts, categoryProducts] = await Promise.all([
+    client.catalogProduct.count({ where: { active: true } }),
+    client.catalogProduct.count({ where: { active: true, headlineKey: { startsWith: "type:" } } }),
+    client.catalogProduct.count({ where: { active: true, headlineKey: { startsWith: "category:" } } }),
+    client.catalogProduct.count({ where: { active: true, headlineKey: "generic" } }),
+    client.catalogProduct.count({ where: { active: true, headlineKey: null } }),
+    client.catalogProduct.findMany({ where: { active: true, headlineKey: "generic" }, orderBy: { score: "desc" }, take: limit, select }),
+    client.catalogProduct.findMany({
+      where: { active: true, headlineKey: { startsWith: "category:" } },
+      orderBy: { score: "desc" },
+      take: limit,
+      select,
+    }),
+  ]);
+  return { active, byType, byCategory, generic, missing, genericProducts, categoryProducts };
 }
