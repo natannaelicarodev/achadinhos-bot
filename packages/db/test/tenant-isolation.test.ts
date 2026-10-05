@@ -134,7 +134,7 @@ describe("forTenant: leitura", () => {
   it("models de auth ficam bloqueados; Plan é só leitura", async () => {
     await expect(dbA.session.findMany()).rejects.toBeInstanceOf(TenantScopeError);
     await expect(dbA.passwordResetToken.findMany()).rejects.toBeInstanceOf(TenantScopeError);
-    expect(await dbA.plan.count()).toBe(3);
+    expect(await dbA.plan.count()).toBe(4);
     await expect(dbA.plan.updateMany({ data: { priceCents: 0 } })).rejects.toBeInstanceOf(TenantScopeError);
     // Catálogo central: todos leem, ninguém altera pelo client de tenant.
     expect(await dbA.catalogProduct.count()).toBeGreaterThanOrEqual(2);

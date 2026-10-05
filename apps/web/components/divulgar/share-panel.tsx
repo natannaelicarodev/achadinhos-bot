@@ -251,28 +251,34 @@ export function SharePanel({ preview, editableInfo }: { preview: SharePreview; e
         >
           <ImageIcon /> Copiar imagem
         </Button>
-        <Button
-          type="button"
-          disabled={!link || pending || extensionBusy}
-          onClick={() =>
-            startTransition(async () => {
-              if (!priceCents) return flash(false, "Informe o preço do produto.");
-              const result = await sendToGroupsAction({
-                productUrl: preview.product.productUrl,
-                catalogProductId: preview.catalogProductId,
-                shortLink,
-                headline,
-                title,
-                priceCents,
-                originalPriceCents,
-                imageUrl: imageUrl || null,
-              });
-              flash(result.ok, result.ok ? result.message : result.error);
-            })
-          }
-        >
-          <SendIcon /> {pending ? "Salvando..." : "Enviar para meus grupos"}
-        </Button>
+        {preview.canSendToGroups ? (
+          <Button
+            type="button"
+            disabled={!link || pending || extensionBusy}
+            onClick={() =>
+              startTransition(async () => {
+                if (!priceCents) return flash(false, "Informe o preço do produto.");
+                const result = await sendToGroupsAction({
+                  productUrl: preview.product.productUrl,
+                  catalogProductId: preview.catalogProductId,
+                  shortLink,
+                  headline,
+                  title,
+                  priceCents,
+                  originalPriceCents,
+                  imageUrl: imageUrl || null,
+                });
+                flash(result.ok, result.ok ? result.message : result.error);
+              })
+            }
+          >
+            <SendIcon /> {pending ? "Salvando..." : "Enviar para meus grupos"}
+          </Button>
+        ) : (
+          <Button render={<Link href="/painel/configuracoes#plano" />} nativeButton={false} variant="ghost">
+            Enviar para grupos: a partir do plano Iniciante
+          </Button>
+        )}
       </div>
 
       {feedback ? (

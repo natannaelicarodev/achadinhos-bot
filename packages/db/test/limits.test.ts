@@ -35,6 +35,16 @@ function addWhatsapp(tenantId: string, name: string, createdAt?: Date) {
 
 const opts = () => ({ client: db.prisma });
 
+describe("plano Catálogo (sem números, grupos e envios)", () => {
+  it("não deixa conectar número nem marcar grupo: avisa que é a partir do Iniciante", async () => {
+    const t = await tenantOnPlan("lim-catalog", "catalog");
+    await expect(assertCanAddWhatsappNumber(t.id, opts())).rejects.toThrow("a partir do plano Iniciante");
+    const channel = await addWhatsapp(t.id, "W");
+    await expect(assertChannelWithinWhatsappLimit(t.id, channel.id, opts())).rejects.toThrow("a partir do plano Iniciante");
+    await expect(assertCanEnableGroupPosting(t.id, opts())).rejects.toThrow("a partir do plano Iniciante");
+  });
+});
+
 describe("limite de números de WhatsApp", () => {
   it("Iniciante: 1 número; o segundo é recusado com mensagem em pt-BR", async () => {
     const t = await tenantOnPlan("lim-starter", "starter");

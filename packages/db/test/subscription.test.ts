@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { getCurrentSubscription, markExpiredTrialsPastDue, startTrial } from "../src/subscription";
+import { PLANS } from "../src/plans";
 import { createTestDatabase, type TestDatabase } from "../src/testing";
 
 let db: TestDatabase;
@@ -18,13 +19,37 @@ async function newTenant(slug: string) {
 }
 
 describe("planos (seed)", () => {
-  it("tem Iniciante, Pro e Agência com os preços e limites certos", async () => {
+  it("tem Catálogo, Iniciante, Pro e Agência com os preços e limites certos", async () => {
     const plans = await db.prisma.plan.findMany({ orderBy: { priceCents: "asc" } });
-    expect(plans.map((p) => [p.code, p.priceCents, p.maxGroups, p.maxPostsPerDay, p.maxUsers, p.reportsLevel])).toEqual([
-      ["starter", 7990, 10, 40, 1, "BASIC"],
-      ["pro", 14990, 50, 150, 1, "GROUPS"],
-      ["agency", 29700, null, 500, 5, "FULL"],
+    expect(
+      plans.map((p) => [
+        p.code,
+        p.priceCents,
+        p.annualPriceCents,
+        p.maxWhatsappNumbers,
+        p.maxGroups,
+        p.maxPostsPerDay,
+        p.maxUsers,
+        p.aiEnabled,
+        p.aiCaptionsPerMonth,
+        p.reportsLevel,
+      ]),
+    ).toEqual([
+      ["catalog", 1990, 19700, 0, 0, 0, 1, false, 0, "BASIC"],
+      ["starter", 4700, 46700, 1, 10, 20, 1, true, 300, "BASIC"],
+      ["pro", 9700, 96700, 3, 50, 100, 1, true, null, "GROUPS"],
+      ["agency", 19700, 196700, 10, null, 500, 5, true, null, "FULL"],
     ]);
+  });
+
+  it("seed atualiza os planos que já existem (upsert pelo code) sem apagar assinaturas", async () => {
+    const tenant = await newTenant("seed-upsert");
+    await startTrial(db.prisma, tenant.id);
+    const starter = await db.prisma.plan.update({ where: { code: "starter" }, data: { priceCents: 7990, maxPostsPerDay: 40 } });
+    for (const plan of PLANS) await db.prisma.plan.upsert({ where: { code: plan.code }, create: plan, update: plan });
+    const after = await db.prisma.plan.findUniqueOrThrow({ where: { code: "starter" } });
+    expect([after.id, after.priceCents, after.maxPostsPerDay]).toEqual([starter.id, 4700, 20]);
+    expect(await db.prisma.subscription.count({ where: { tenantId: tenant.id, planId: starter.id } })).toBe(1);
   });
 });
 

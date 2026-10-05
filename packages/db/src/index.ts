@@ -13,9 +13,10 @@ export {
   type StoreSecrets,
 } from "./store-credentials";
 export { startTrial, getCurrentSubscription, markExpiredTrialsPastDue, TRIAL_DAYS } from "./subscription";
-export { PLANS, TRIAL_PLAN_CODE, type PlanSeed } from "./plans";
+export { PLANS, TRIAL_PLAN_CODE, FIRST_SENDING_PLAN_NAME, planAllowsSending, type PlanSeed } from "./plans";
 export {
   PlanLimitError,
+  NO_SENDING_MESSAGE,
   getWhatsappUsage,
   assertCanAddWhatsappNumber,
   assertChannelWithinWhatsappLimit,

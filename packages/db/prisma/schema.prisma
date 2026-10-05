@@ -88,6 +88,7 @@ model Plan {
   code               String         @unique // "starter", "pro", "agency"
   name               String
   priceCents         Int
+  annualPriceCents   Int            @default(0) // preço do plano anual (cobrança da fase 9)
   currency           String         @default("BRL")
   maxWhatsappNumbers Int
   maxTelegramBots    Int
@@ -95,6 +96,7 @@ model Plan {
   maxPostsPerDay     Int
   maxUsers           Int
   aiEnabled          Boolean
+  aiCaptionsPerMonth Int? // legendas com IA por mês (fase 7); null = ilimitado
   reportsLevel       ReportsLevel
   active             Boolean        @default(true)
   createdAt          DateTime       @default(now())

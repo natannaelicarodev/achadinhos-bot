@@ -1,4 +1,4 @@
-import { formatMinute, WARMUP_DAYS } from "@achadinhos/db";
+import { formatMinute, getCurrentSubscription, planAllowsSending, WARMUP_DAYS } from "@achadinhos/db";
 import { STORE_NAMES, type AffiliateStore } from "@achadinhos/stores";
 import type { Metadata } from "next";
 import Link from "next/link";
@@ -6,6 +6,7 @@ import type { AutopilotSettingsInput } from "@/app/painel/agendamento/actions";
 import { AutopilotForm } from "@/components/agendamento/autopilot-form";
 import { AutoRefresh, ChannelPauseButton, DevPickNowButton, ResumeStoreButton } from "@/components/agendamento/controls";
 import { PageHeader } from "@/components/painel/page-header";
+import { PlanLocked } from "@/components/painel/plan-locked";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -42,6 +43,15 @@ const TONE: Record<string, string> = {
 export default async function AgendamentoPage() {
   const { user } = await requireSession();
   const now = new Date();
+  const subscription = await getCurrentSubscription(user.tenantId);
+  if (!subscription || !planAllowsSending(subscription.plan)) {
+    return (
+      <>
+        <PageHeader title="Agendamento" description="Piloto automático e fila de envios para os seus grupos." />
+        <PlanLocked feature="O piloto automático e a fila de envios" />
+      </>
+    );
+  }
   const o = await loadAutopilotOverview(user.tenantId, now);
   const s = o.settings;
   const pausedStores = o.credentials.filter((c) => c.autopilotPausedAt);

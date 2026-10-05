@@ -1,13 +1,23 @@
-import { getFeatureRequest, getWhatsappUsage, PlanLimitError } from "@achadinhos/db";
+import { getCurrentSubscription, getFeatureRequest, getWhatsappUsage, planAllowsSending, PlanLimitError } from "@achadinhos/db";
 import { ConnectButton } from "@/components/canais/connect-button";
 import { TelegramInterestCard } from "@/components/canais/telegram-interest-card";
 import { WhatsappChannelCard } from "@/components/canais/whatsapp-channel-card";
 import { PageHeader } from "@/components/painel/page-header";
+import { PlanLocked } from "@/components/painel/plan-locked";
 import { getTenantDb } from "@/lib/auth/current";
 
 export default async function CanaisPage() {
   const { db, user } = await getTenantDb();
   const isOwner = user.role === "OWNER";
+  const subscription = await getCurrentSubscription(user.tenantId);
+  if (!subscription || !planAllowsSending(subscription.plan)) {
+    return (
+      <>
+        <PageHeader title="Canais" description="Números de WhatsApp que postam suas ofertas." />
+        <PlanLocked feature="Conectar números de WhatsApp e postar nos grupos" />
+      </>
+    );
+  }
   const [channels, usage, telegramRequest] = await Promise.all([
     db.channel.findMany({
       where: { type: "WHATSAPP" },
