@@ -37,6 +37,8 @@ describe("forTenant: leitura", () => {
       dbA.featureRequest.findMany(),
       dbA.favorite.findMany(),
       dbA.messageTemplate.findMany(),
+      dbA.autopilotSettings.findMany(),
+      dbA.extensionToken.findMany(),
     ]);
     for (const rows of lists) {
       expect(rows).toHaveLength(1);
@@ -60,6 +62,14 @@ describe("forTenant: leitura", () => {
     await expect(dbA.messageTemplate.findUnique({ where: { tenantId: b.tenant.id } })).rejects.toBeInstanceOf(
       TenantScopeError,
     );
+    await expect(dbA.autopilotSettings.findUnique({ where: { tenantId: b.tenant.id } })).rejects.toBeInstanceOf(
+      TenantScopeError,
+    );
+    await expect(dbA.autopilotSettings.update({ where: { tenantId: b.tenant.id }, data: { enabled: false } })).rejects.toBeInstanceOf(
+      TenantScopeError,
+    );
+    expect(await dbA.extensionToken.findUnique({ where: { id: b.extensionToken.id } })).toBeNull();
+    expect(await dbA.extensionToken.findUnique({ where: { tokenHash: b.extensionToken.tokenHash } })).toBeNull();
     expect(await dbA.whatsAppSession.findUnique({ where: { channelId: b.channel.id } })).toBeNull();
     expect(
       await dbA.whatsAppSessionKey.findUnique({
@@ -233,6 +243,8 @@ describe("exclusão de tenant", () => {
       db.prisma.featureRequest.count({ where }),
       db.prisma.favorite.count({ where }),
       db.prisma.messageTemplate.count({ where }),
+      db.prisma.autopilotSettings.count({ where }),
+      db.prisma.extensionToken.count({ where }),
     ]);
     expect(counts.every((n) => n === 0)).toBe(true);
     expect(await db.prisma.offer.count({ where: { tenantId: b.tenant.id } })).toBe(1);

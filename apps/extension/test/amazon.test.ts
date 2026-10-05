@@ -104,19 +104,20 @@ describe("Amazon: vitrine compartilhada", () => {
     const batches = await collectAmazonVitrine(async (slug, page) => {
       calls.push(`${slug}:${page}`);
       return [one(`B00000000${page}`)];
-    }, ["grocery", "beauty"], { pause: noPause });
+    }, ["grocery", "beauty"], { sleep: noPause });
     expect(calls).toEqual(["grocery:1", "grocery:2", "beauty:1", "beauty:2"]);
     expect(batches.map((b) => [b.slug, b.items.length])).toEqual([["grocery", 2], ["beauty", 2]]);
   });
 
-  it("captcha PARA a coleta (não insiste) e mantém o que já leu", async () => {
+  it("captcha PARA tudo na hora (não insiste)", async () => {
     const calls: string[] = [];
-    const batches = await collectAmazonVitrine(async (slug, page) => {
-      calls.push(`${slug}:${page}`);
-      if (slug === "beauty") throw new Error("A Amazon pediu uma verificação (captcha).");
-      return [one("B000000001")];
-    }, ["grocery", "beauty", "hpc"], { pause: noPause });
+    await expect(
+      collectAmazonVitrine(async (slug, page) => {
+        calls.push(`${slug}:${page}`);
+        if (slug === "beauty") throw new Error("A Amazon pediu uma verificação (captcha).");
+        return [one("B000000001")];
+      }, ["grocery", "beauty", "hpc"], { sleep: noPause }),
+    ).rejects.toThrow("captcha");
     expect(calls).toEqual(["grocery:1", "grocery:2", "beauty:1"]);
-    expect(batches.map((b) => b.slug)).toEqual(["grocery"]);
   });
 });

@@ -6,7 +6,7 @@ SaaS multi-tenant de "achadinhos": coleta ofertas, gerencia no painel web e disp
 
 **Lançamento só com WhatsApp. Telegram está FORA do escopo atual** (decisão de produto): não implementar nada de Telegram (bot, envio, tela, job, integração grammY) sem o dono do produto pedir. O que já existe fica como está e não deve ser removido: `Plan.maxTelegramBots`, `ChannelType.TELEGRAM`, a dependência `grammy` e o stub `apps/worker/src/telegram/`. No painel, a aba Telegram de Canais só registra interesse ("Quero usar o Telegram" -> `FeatureRequest`).
 
-Status atual: **fase 4e** (Amazon: link curto pela SiteStripe na extensão do cliente + "Mais vendidos" no catálogo pela vitrine compartilhada). Fase 4d: Mercado Livre no catálogo central pela vitrine compartilhada da extensão do administrador. Fase 4c: extensão do Chrome (meli.la e preço real do ML automáticos). Fase 4b: credenciais de afiliado do cliente, conversão de links, Divulgar link, mensagem pronta. Fase 4a: catálogo central minerado nas lojas + página Catálogo. Fase 3: Telegram adiado + pedido de interesse. Fase 2: WhatsApp via Baileys (conexão por QR, sessão no Postgres, reconexão, grupos, envio de teste). Fase 1: contas, login, multi-tenant, painel base, credenciais de lojas criptografadas.
+Status atual: **fase 5** (piloto automático + fila de envio aos grupos). Fase 4e: Amazon (link curto pela SiteStripe na extensão do cliente + "Mais vendidos" no catálogo pela vitrine compartilhada). Fase 4d: Mercado Livre no catálogo central pela vitrine compartilhada da extensão do administrador. Fase 4c: extensão do Chrome (meli.la e preço real do ML automáticos). Fase 4b: credenciais de afiliado do cliente, conversão de links, Divulgar link, mensagem pronta. Fase 4a: catálogo central minerado nas lojas + página Catálogo. Fase 3: Telegram adiado + pedido de interesse. Fase 2: WhatsApp via Baileys (conexão por QR, sessão no Postgres, reconexão, grupos, envio de teste). Fase 1: contas, login, multi-tenant, painel base, credenciais de lojas criptografadas.
 
 Planos: Iniciante (`starter`, R$ 79,90), Pro (`pro`, R$ 149,90), Agência (`agency`, R$ 297,00) — definidos em `packages/db/src/plans.ts`. Cadastro = trial de 7 dias no Iniciante; trial vencido vira `PAST_DUE` (pausa de envios: fase 9).
 
@@ -109,7 +109,7 @@ cd apps/web && pnpm dlx shadcn@latest add <componente>   # novo componente shadc
 - Redirecionamentos (meli.la, amzn.to, onelink.shein.com, links curtos) e leitura de página só em domínios das lojas (`resolveStoreUrl`, `fetchProductInfo`; lista fechada, 5 saltos, 10s). Nunca buscar URL arbitrária no servidor. Imagem para "Copiar imagem" passa por `/api/image-proxy` (só CDNs das lojas).
 - Mensagem: `MessageTemplate` (um por tenant; sem linha = modelo padrão). Variáveis `{headline} {titulo} {preco_de} {preco_por} {desconto} {link}`; linha com variável vazia some. Editor em Configurações.
 - "Enviar para meus grupos": o servidor REFAZ o link e a mensagem (não confia no navegador) e grava a `Offer` (`saveOfferForSending`: `affiliateUrl`, `messageText`, `sendRequestedAt`, status ACTIVE). Uma oferta por produto do catálogo por tenant. O envio aos grupos é da fase 5 (ofertas com `sendRequestedAt`).
-- **Pendente para a fase 5:** `Post` NÃO guarda cópia do que foi enviado (só shortCode, status, datas, id da mensagem, erro). Antes de enviar posts reais, acrescentar snapshot no `Post` (texto final, preço e link enviados) para o histórico não mudar quando a `Offer` for atualizada.
+- "Enviar para meus grupos" grava a `Offer` com `sendRequestedAt`; a fila da fase 5 cria os posts (`sendQueuedAt`) e envia.
 
 ## Extensão do Chrome (fase 4c)
 
@@ -137,6 +137,18 @@ cd apps/web && pnpm dlx shadcn@latest add <componente>   # novo componente shadc
 - **Catálogo (vitrine compartilhada, extensão do ADMINISTRADOR):** de hora em hora lê as páginas públicas de "Mais vendidos" (`/gp/bestsellers/{slug}/?pg=N`, 2 páginas x 30 produtos, pausa de 3s) das categorias de `AMAZON_BESTSELLER_CATEGORIES` (grocery = Alimentos e Bebidas) e envia a `POST /api/catalog/amazon` (mesma chave `ML_VITRINE_TOKEN`). Captcha PARA a coleta (não insiste). Produto some após 48h sem aparecer (`VITRINE_STORES`).
 - A Amazon não mostra vendidos nem comissão nas páginas: `soldCount`/`commission` ficam null; para o ranking, `popularity` = avaliações x 10 (estimativa, não gravada nem mostrada).
 
+## Piloto automático e fila de envio (fase 5)
+
+- Worker: `apps/worker/src/autopilot/engine.ts` (regras com relógio injetável, testes em `apps/worker/test/autopilot.test.ts`) + `queues/autopilot.ts` (BullMQ job scheduler, tick a cada 15 s; o piloto escolhe no máximo 1x por minuto). Regras puras compartilhadas com o painel: `packages/db/src/autopilot.ts` (importável no navegador: `@achadinhos/db/autopilot`).
+- Config por tenant: `AutopilotSettings` (página Agendamento). Horários no fuso America/Sao_Paulo; "hoje" = dia em São Paulo.
+- Tick: (1) descarta posts vencidos (`expiresAt`) como DISCARDED, nunca envia atrasado; (2) ofertas manuais (`sendRequestedAt` sem `sendQueuedAt`) viram posts MANUAL (esperam a janela por até 24h); (3) piloto: dentro de dia/janela e do ritmo (60/`offersPerHour` min) escolhe o produto de maior `score` que passa nos filtros, com `lastSeenAt` nas últimas `AUTOPILOT_MAX_PRICE_AGE_HOURS` (padrão 6), de loja utilizável, não postado (loja + id + grupo) há `repeatDays`; cria Offer + 1 Post AUTO por grupo (expira em 60 min ou no fim da janela); (4) envio: 1 post por número por vez, intervalo aleatório `groupIntervalMin/MaxSeconds` (30 a 90 s).
+- **Regra das lojas no piloto: link CURTO sempre.** Shopee: link curto da API do cliente, gerado no servidor. Mercado Livre (só com `ML_AUTOPILOT_ENABLED=true`; a dona do produto confirmou em 10/2026 que o link longo matt_word/matt_tool gera comissão) e Amazon: o post nasce `AWAITING_LINK` e só é liberado quando a extensão DO CLIENTE (Chrome aberto, ligada ao piloto na página Extensão, chave em `ExtensionToken`, só o hash no banco) gera o meli.la / link.amazon (mesmos pedidos do modo manual) e o servidor confere (ML: etiqueta + ferramenta; Amazon: tag + mesmo ASIN). A extensão chama `POST /api/extension/autopilot` a cada 1 min (sinal de vida + entrega dos links + próximos pendentes). O piloto só escolhe ML/Amazon se a extensão deu sinal de vida nos últimos 10 min (`SHORT_LINK_STORES`); link que não chega no prazo -> DISCARDED. **Nunca enviar ML nem Amazon com link longo pelo piloto.**
+- Limites contados no backend: plano `maxPostsPerDay` = OFERTAS distintas enviadas no dia (1 oferta para 10 grupos conta 1); número = MENSAGENS/dia (`channelDailyLimit`, padrão 80) com aquecimento pela 1ª conexão (`Channel.firstConnectedAt`): 20 no dia 1 subindo até o limite no dia 7. "Cabe na hora": `maxOffersPerHour` = 3600 / (grupos do número com mais grupos x intervalo máximo + 5 min); o painel não salva acima.
+- Falhas: 3 tentativas por post (1, 5, 15 min); 3 posts seguidos com falha no número -> `Channel.autopilotPausedAt` + faixa no painel (Retomar na página Agendamento). Credencial que não gera link -> `StoreCredential.autopilotPausedAt` (só aquela loja; volta ao salvar a credencial de novo).
+- Link por grupo: Shopee gera o link com subIds [tenant, grupo] na hora do envio e troca no texto daquele post. Histórico imutável: o Post guarda texto final, link, preço, imagem, loja e produto enviados.
+- Modo acelerado (só dev): `AUTOPILOT_DEV_FAST=true` com NODE_ENV != production -> tick 5 s, 1 oferta a cada 2 min, 5 a 10 s entre grupos, descarte em 10 min, botão "Escolher oferta agora (teste)".
+- Vitrine pela extensão (fase 4d/4e) com limites aprovados: pausa aleatória ML 3 a 6 s e Amazon 5 a 10 s; até 100 páginas/h no ML e 30/h na Amazon (janela móvel); captcha/bloqueio em qualquer loja para TUDO por 1 hora; "Atualizar agora" só 15 min depois da última rodada.
+
 ## WhatsApp (Baileys)
 
 - **Baileys fixado em versão exata (`7.0.0-rc14`, sem ^/~). Só atualizar depois de testar a versão nova** (conectar por QR, reconectar, listar grupos, enviar teste) num número de teste.
@@ -146,7 +158,8 @@ cd apps/web && pnpm dlx shadcn@latest add <componente>   # novo componente shadc
 - Um número = um socket em um único worker: trava `wa:lock:<channelId>` no Redis. Dev e produção usam projetos Railway separados (bancos e Redis diferentes).
 - Reconexão: decisão em `reconnect.ts` (515 reconecta já; 401/411 = LOGGED_OUT e apaga sessão; 440/403 = ERROR e para; QR expirado = DISCONNECTED; resto = backoff 2s→5min).
 - Envio de teste: máx. 10/número/hora e 20s entre envios (`rate-limit.ts`). Imagem por URL: só https, 10s, 5 MB, jpeg/png/webp, bloqueia IP interno; falhou = envia só texto com aviso.
-- Envio em massa ainda NÃO existe. Não adicionar sem limite por número e pausa entre mensagens (risco de banimento).
+- Reinício rápido do worker (Ctrl+C no Windows) pode deixar a trava do número no Redis por até 60 s: `startAll` tenta reconectar de novo depois que ela expira (3 tentativas).
+- Envio em massa só pela fila da fase 5 (limite por número, aquecimento, intervalo aleatório entre mensagens). Não criar outro caminho de envio em massa.
 - Imports sem extensão (moduleResolution `Bundler`).
 
 ## Regras

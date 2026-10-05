@@ -68,4 +68,7 @@ export type {
   Favorite,
   CatalogMiningRun,
   MessageTemplate,
+  AutopilotSettings,
+  ExtensionToken,
 } from "./generated/prisma/client";
+export * from "./autopilot";

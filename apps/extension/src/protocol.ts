@@ -73,6 +73,15 @@ export const requestSchemas = {
     amazonCategories: z.array(z.string().regex(/^[a-z][a-z-]{1,40}$/, "Categoria da Amazon inválida.")).max(20).default([]),
   }),
   "vitrine.status": z.object({}),
+  /**
+   * Piloto automático do CLIENTE: com a chave dele, a extensão gera de minuto em minuto o
+   * meli.la dos produtos do Mercado Livre que o piloto escolheu (enquanto o Chrome estiver aberto).
+   */
+  "autopilot.configure": z.object({
+    enabled: z.boolean(),
+    token: z.string().regex(/^[A-Za-z0-9_-]{32,128}$/, "Chave inválida.").nullable().default(null),
+  }),
+  "autopilot.status": z.object({}),
   "vitrine.runNow": z.object({}),
 } as const;
 
@@ -110,9 +119,18 @@ export interface ResponseMap {
   "amz.productInfo": { title: string | null; imageUrl: string | null; priceCents: number | null; originalPriceCents: number | null };
   "amz.diagnose": { steps: { step: string; ok: boolean; detail: string }[] };
   "ml.hubSearch": { items: HubItem[]; hasMore: boolean };
+  "autopilot.configure": AutopilotLinkStatus;
+  "autopilot.status": AutopilotLinkStatus;
   "vitrine.configure": VitrineStatus;
   "vitrine.status": VitrineStatus;
   "vitrine.runNow": VitrineStatus;
+}
+
+/** Piloto automático do cliente nesta extensão (nunca devolve a chave). */
+export interface AutopilotLinkStatus {
+  enabled: boolean;
+  lastRunAt: string | null;
+  lastResult: { ok: boolean; message: string } | null;
 }
 
 /** Estado da vitrine compartilhada nesta extensão (nunca devolve a chave). */
@@ -123,6 +141,8 @@ export interface VitrineStatus {
   running: boolean;
   lastRunAt: string | null;
   lastResult: { ok: boolean; message: string } | null;
+  /** Captcha/bloqueio em alguma loja: vitrine parada até este horário (ISO). */
+  blockedUntil: string | null;
 }
 
 export type ExtensionResult<T extends RequestType> = { ok: true; data: ResponseMap[T] } | { ok: false; error: string };

@@ -82,6 +82,10 @@ export async function seedTenant(prisma: PrismaClient, name: string) {
   const messageTemplate = await prisma.messageTemplate.create({
     data: { tenantId: tenant.id, body: `Modelo ${name} {link}`, headline: `Headline ${name}` },
   });
+  const autopilot = await prisma.autopilotSettings.create({ data: { tenantId: tenant.id, enabled: true } });
+  const extensionToken = await prisma.extensionToken.create({
+    data: { tenantId: tenant.id, userId: user.id, tokenHash: `hash-${slug}` },
+  });
 
   return {
     tenant,
@@ -100,6 +104,8 @@ export async function seedTenant(prisma: PrismaClient, name: string) {
     catalogProduct,
     favorite,
     messageTemplate,
+    autopilot,
+    extensionToken,
   };
 }
 

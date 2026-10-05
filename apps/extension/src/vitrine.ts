@@ -1,24 +1,73 @@
 // Vitrine compartilhada: a extensão do ADMINISTRADOR busca a vitrine do portal de
 // afiliados (mais vendidos, por categoria) e envia os produtos ao catálogo central.
 // Só dados públicos de produto saem do navegador: nada da sessão do ML.
+//
+// Cuidados para não parecer robô (aprovados em 10/2026):
+// - pausa ALEATÓRIA entre pedidos: ML 3 a 6 s; Amazon 5 a 10 s;
+// - no máximo 100 páginas/hora no ML e 30/hora na Amazon (janela móvel de 60 min);
+// - captcha ou bloqueio em QUALQUER loja: para tudo e só volta 1 hora depois;
+// - "Atualizar agora" só 15 min depois da última rodada.
 import type { AmazonBestseller } from "./amazon";
 import type { HubItem } from "./protocol";
 
 /** Páginas da vitrine por categoria (mais vendidos). */
 export const VITRINE_PAGES_PER_CATEGORY = 10;
-/** Pausa entre pedidos ao ML (não sobrecarregar o portal). */
-export const VITRINE_PAUSE_MS = 1_500;
 export const VITRINE_ENDPOINT_PATH = "/api/catalog/mercado-livre";
 export const AMAZON_VITRINE_ENDPOINT_PATH = "/api/catalog/amazon";
-/** Amazon: páginas de "Mais vendidos" por categoria (30 produtos cada) e pausa maior entre pedidos. */
+/** Amazon: páginas de "Mais vendidos" por categoria (30 produtos cada). */
 export const AMAZON_PAGES_PER_CATEGORY = 2;
-export const AMAZON_PAUSE_MS = 3_000;
 export const VITRINE_INTERVAL_MINUTES = 60;
 /** Categoria com menos que isso nos "mais vendidos" é completada com a vitrine normal (sem esse filtro). */
 export const VITRINE_MIN_PER_CATEGORY = 60;
-
 /** Páginas por palavra-chave (categorias que o portal não tem, ex.: Alimentos). */
 export const VITRINE_PAGES_PER_SEARCH = 3;
+
+export type PauseRange = readonly [minMs: number, maxMs: number];
+export const ML_PAUSE_RANGE_MS: PauseRange = [3_000, 6_000];
+export const AMAZON_PAUSE_RANGE_MS: PauseRange = [5_000, 10_000];
+export const ML_PAGES_PER_HOUR = 100;
+export const AMAZON_PAGES_PER_HOUR = 30;
+export const PAGE_WINDOW_MS = 60 * 60_000;
+/** Captcha/bloqueio: tudo parado por 1 hora. */
+export const BLOCK_COOLDOWN_MS = 60 * 60_000;
+/** "Atualizar agora": só depois de 15 min da última rodada. */
+export const RUN_NOW_MIN_INTERVAL_MS = 15 * 60_000;
+
+/** Limite de páginas por hora da loja atingido: a rodada para (sem erro grave). */
+export class HourlyLimitError extends Error {
+  override name = "HourlyLimitError";
+}
+
+/** Captcha ou bloqueio da loja: para TUDO (todas as lojas) por 1 hora. */
+export function isBlockError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const status = (error as { status?: unknown }).status;
+  return /captcha|bloque|blocked|too many/i.test(error.message) || status === 429 || status === 503;
+}
+
+/** Pausa aleatória dentro da faixa (nunca fixa). */
+export function randomPauseMs(range: PauseRange, random: () => number = Math.random): number {
+  return Math.round(range[0] + (range[1] - range[0]) * random());
+}
+
+/**
+ * Janela móvel de 60 min: devolve o registro sem as páginas antigas e se ainda
+ * cabe mais uma página. `log` = horários (ms) das páginas já pedidas.
+ */
+export function checkPageBudget(log: number[], now: number, limit: number): { ok: boolean; log: number[] } {
+  const recent = log.filter((t) => now - t < PAGE_WINDOW_MS);
+  return { ok: recent.length < limit, log: recent };
+}
+
+interface CollectOptions {
+  /** Chamado antes de CADA pedido: conta a página e lança HourlyLimitError se passou do limite. */
+  beforeRequest?: () => Promise<void>;
+  pauseRange?: PauseRange;
+  random?: () => number;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 export interface VitrineBatch {
   /** Categoria do ML pesquisada (null = sem categoria). */
@@ -33,20 +82,15 @@ type HubSearch = (params: { category: string | null; search: string; offset: num
 /**
  * Busca as categorias, depois as palavras-chave e por último a vitrine geral.
  * Falha numa busca não derruba as outras; se TODAS falharem, lança o primeiro erro.
+ * Limite de páginas da hora: para e devolve o que já leu. Bloqueio: lança na hora.
  */
 export async function collectVitrine(
   search: HubSearch,
   categories: string[],
-  options: {
-    searches?: string[];
-    pages?: number;
-    searchPages?: number;
-    minPerCategory?: number;
-    pause?: (ms: number) => Promise<void>;
-  } = {},
+  options: CollectOptions & { searches?: string[]; pages?: number; searchPages?: number; minPerCategory?: number } = {},
 ): Promise<VitrineBatch[]> {
   const pages = options.pages ?? VITRINE_PAGES_PER_CATEGORY;
-  const pause = options.pause ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const sleep = options.sleep ?? defaultSleep;
   const queries = [
     ...categories.map((mlCategory) => ({ mlCategory, search: "", pages })),
     ...(options.searches ?? []).map((term) => ({ mlCategory: null, search: term, pages: options.searchPages ?? VITRINE_PAGES_PER_SEARCH })),
@@ -61,8 +105,9 @@ export async function collectVitrine(
     const fetchPages = async (bestSeller: boolean, maxPages: number) => {
       let offset = 0;
       for (let page = 0; page < maxPages; page++) {
-        if (!first) await pause(VITRINE_PAUSE_MS);
+        if (!first) await sleep(randomPauseMs(options.pauseRange ?? ML_PAUSE_RANGE_MS, options.random));
         first = false;
+        await options.beforeRequest?.();
         const found = await search({ category: mlCategory, search: term, offset, bestSeller });
         if (found.length === 0) break;
         for (const item of found) {
@@ -79,6 +124,12 @@ export async function collectVitrine(
       const min = term ? Math.min(options.minPerCategory ?? VITRINE_MIN_PER_CATEGORY, 20) : (options.minPerCategory ?? VITRINE_MIN_PER_CATEGORY);
       if (items.length < min) await fetchPages(false, queryPages);
     } catch (error) {
+      if (error instanceof HourlyLimitError) {
+        if (items.length > 0) batches.push({ mlCategory, search: term, items });
+        if (batches.length === 0) throw error;
+        return batches;
+      }
+      if (isBlockError(error)) throw error;
       firstError ??= error;
     }
     if (items.length > 0) batches.push({ mlCategory, search: term, items });
@@ -94,16 +145,17 @@ export interface AmazonVitrineBatch {
 }
 
 /**
- * Amazon: "Mais vendidos" de cada categoria, até N páginas. Captcha PARA tudo
- * (não insiste); outra falha numa categoria não derruba as outras.
+ * Amazon: "Mais vendidos" de cada categoria, até N páginas. Captcha/bloqueio lança na
+ * hora (para tudo); limite da hora para e devolve o que já leu; outra falha numa
+ * categoria não derruba as outras.
  */
 export async function collectAmazonVitrine(
   read: (slug: string, page: number) => Promise<AmazonBestseller[]>,
   slugs: string[],
-  options: { pages?: number; pause?: (ms: number) => Promise<void> } = {},
+  options: CollectOptions & { pages?: number } = {},
 ): Promise<AmazonVitrineBatch[]> {
   const pages = options.pages ?? AMAZON_PAGES_PER_CATEGORY;
-  const pause = options.pause ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const sleep = options.sleep ?? defaultSleep;
   const batches: AmazonVitrineBatch[] = [];
   let firstError: unknown = null;
   let first = true;
@@ -111,18 +163,20 @@ export async function collectAmazonVitrine(
     const items: AmazonBestseller[] = [];
     try {
       for (let page = 1; page <= pages; page++) {
-        if (!first) await pause(AMAZON_PAUSE_MS);
+        if (!first) await sleep(randomPauseMs(options.pauseRange ?? AMAZON_PAUSE_RANGE_MS, options.random));
         first = false;
+        await options.beforeRequest?.();
         const found = await read(slug, page);
         if (found.length === 0) break;
         items.push(...found);
       }
     } catch (error) {
-      if (error instanceof Error && /captcha/i.test(error.message)) {
-        if (batches.length === 0 && items.length === 0) throw error;
+      if (error instanceof HourlyLimitError) {
         if (items.length > 0) batches.push({ slug, items });
-        return batches; // a Amazon desconfiou: para por aqui
+        if (batches.length === 0) throw error;
+        return batches;
       }
+      if (isBlockError(error)) throw error;
       firstError ??= error;
     }
     if (items.length > 0) batches.push({ slug, items });

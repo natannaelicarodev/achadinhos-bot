@@ -1,16 +1,11 @@
 // Servidor: prévia de divulgação (link do cliente + mensagem pronta).
 // Credencial CENTRAL da Shopee: só ShopeeCatalogReader (ler título/preço/imagem).
 // Link de afiliado: sempre generateAffiliateLink (credencial DO CLIENTE).
-import { forTenant } from "@achadinhos/db";
 import {
   AffiliateLinkError,
-  DEFAULT_HEADLINE,
-  DEFAULT_MESSAGE_TEMPLATE,
   fetchProductInfo,
   generateAffiliateLink,
-  messageVariables,
   MissingCredentialError,
-  renderMessage,
   ShopeeCatalogReader,
   type AffiliateStore,
   type PageProductInfo,
@@ -27,19 +22,6 @@ export function getCentralShopeeReader(): ShopeeCatalogReader | null {
     centralReader = appId && secret ? new ShopeeCatalogReader({ appId, secret }) : null;
   }
   return centralReader;
-}
-
-export interface MessageSettings {
-  body: string;
-  headline: string;
-  isDefault: boolean;
-}
-
-export async function getMessageSettings(tenantId: string): Promise<MessageSettings> {
-  const row = await forTenant(tenantId).messageTemplate.findUnique({ where: { tenantId } });
-  return row
-    ? { body: row.body, headline: row.headline, isDefault: false }
-    : { body: DEFAULT_MESSAGE_TEMPLATE, headline: DEFAULT_HEADLINE, isDefault: true };
 }
 
 export type LinkResult =
@@ -80,13 +62,5 @@ export async function readProductInfo(product: ProductRef): Promise<PageProductI
   return fetchProductInfo(product.productUrl);
 }
 
-export interface ShareProduct {
-  title: string;
-  priceCents: number | null;
-  originalPriceCents: number | null;
-  discountPct: number | null;
-}
-
-export function composeMessage(settings: { body: string }, product: ShareProduct, link: string, headline: string): string {
-  return renderMessage(settings.body, messageVariables(product, link, headline));
-}
+// Modelo de mensagem: mesmo código do worker (piloto automático).
+export { composeMessage, getMessageSettings, type MessageSettings, type ShareProduct } from "@achadinhos/stores";

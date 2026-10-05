@@ -1,4 +1,4 @@
-import { getLatestMiningRuns, getPrisma, listCatalog } from "@achadinhos/db";
+import { getLatestMiningRuns, getPrisma, listCatalog, maxPriceAgeHours } from "@achadinhos/db";
 import { HeartIcon, LayoutGridIcon } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
@@ -39,6 +39,12 @@ export default async function CatalogoPage({
   const [catalog, runs] = await Promise.all([listCatalog(user.tenantId, filters), getLatestMiningRuns(getPrisma())]);
   const lastSuccess = runs.filter((r) => r?.status === "SUCCESS").map((r) => r!.finishedAt ?? r!.startedAt);
   const updatedAt = lastSuccess.sort((a, b) => b.getTime() - a.getTime())[0];
+  // Preço mais velho que o limite do piloto (6h): o card avisa a idade.
+  const maxAge = maxPriceAgeHours();
+  const priceAge = (seen: Date) => {
+    const hours = Math.floor((Date.now() - seen.getTime()) / 3_600_000);
+    return hours >= maxAge ? hours : null;
+  };
   const anyFilter = Boolean(filters.search || filters.category || filters.store || filters.favoritesOnly);
 
   return (
@@ -142,6 +148,7 @@ export default async function CatalogoPage({
                   commissionCents: item.commissionCents,
                   rating: item.rating,
                   soldCount: item.soldCount,
+                  priceAgeHours: priceAge(item.lastSeenAt),
                   isFavorite: item.isFavorite,
                   hasOffer: item.hasOffer,
                 }}

@@ -49,3 +49,7 @@ export const QR_TTL_SECONDS = 60;
 /** Fila da mineração do catálogo central (só o worker usa). */
 export const CATALOG_QUEUE = "catalog";
 export const CATALOG_SCHEDULER_ID = "catalog-mining";
+
+/** Piloto automático + fila de envio aos grupos (só o worker usa). */
+export const AUTOPILOT_QUEUE = "autopilot";
+export const AUTOPILOT_SCHEDULER_ID = "autopilot-tick";

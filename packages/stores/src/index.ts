@@ -76,3 +76,4 @@ export {
   type MessageProduct,
   type WhatsappSegment,
 } from "./message";
+export { getMessageSettings, composeMessage, type MessageSettings, type ShareProduct } from "./message-settings";

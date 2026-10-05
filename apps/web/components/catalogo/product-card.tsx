@@ -25,6 +25,8 @@ export interface CatalogItemView {
   commissionCents: number | null;
   rating: number | null;
   soldCount: number | null;
+  /** Horas desde a última atualização do preço, quando passou do limite (6h); null = recente. */
+  priceAgeHours: number | null;
   isFavorite: boolean;
   hasOffer: boolean;
 }
@@ -60,6 +62,12 @@ function CatalogShare({ productId }: { productId: string }) {
   if (!state) return <p className="text-sm text-muted-foreground">Gerando seu link de afiliado...</p>;
   if ("error" in state) return <p className="text-sm text-destructive">{state.error}</p>;
   return <SharePanel preview={state.preview} editableInfo={false} />;
+}
+
+/** Preço antigo (catálogo da vitrine sem atualizar): avisa a idade. */
+function PriceAge({ hours }: { hours: number }) {
+  const text = hours >= 48 ? `${Math.floor(hours / 24)} dias` : `${hours} horas`;
+  return <p className="text-xs text-amber-700 dark:text-amber-400">preço de {text} atrás</p>;
 }
 
 export function ProductCard({ item }: { item: CatalogItemView }) {
@@ -119,6 +127,7 @@ export function ProductCard({ item }: { item: CatalogItemView }) {
           </button>
           <div className="mt-auto grid gap-1">
             <p className="text-lg font-semibold tabular-nums">{formatBRL(item.priceCents)}</p>
+            {item.priceAgeHours !== null ? <PriceAge hours={item.priceAgeHours} /> : null}
             <p className="text-xs text-muted-foreground">
               Comissão: <span className="font-medium text-foreground">{formatCommission(item.commissionCents, item.commissionPct)}</span>
             </p>
@@ -152,6 +161,11 @@ export function ProductCard({ item }: { item: CatalogItemView }) {
                 <div>
                   <dt className="text-muted-foreground">Preço</dt>
                   <dd className="text-2xl font-semibold tabular-nums">{formatBRL(item.priceCents)}</dd>
+                  {item.priceAgeHours !== null ? (
+                    <dd>
+                      <PriceAge hours={item.priceAgeHours} />
+                    </dd>
+                  ) : null}
                   {item.originalPriceCents ? (
                     <dd className="text-muted-foreground">
                       de <s>{formatBRL(item.originalPriceCents)}</s>

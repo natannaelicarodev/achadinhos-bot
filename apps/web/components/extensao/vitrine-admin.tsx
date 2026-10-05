@@ -65,6 +65,16 @@ export function VitrineAdmin() {
         </strong>
         {status.running ? " · atualizando agora (leva uns 5 a 6 minutos)..." : ""}
       </p>
+      {status.blockedUntil && new Date(status.blockedUntil).getTime() > Date.now() ? (
+        <p className="text-destructive">
+          Captcha ou bloqueio numa loja: a vitrine está parada e volta sozinha às{" "}
+          {dateTime.format(new Date(status.blockedUntil))}.
+        </p>
+      ) : null}
+      <p className="text-xs text-muted-foreground">
+        Limites: Mercado Livre até 100 páginas/hora (pausa de 3 a 6 s); Amazon até 30 páginas/hora (pausa de 5 a 10 s).
+        &quot;Atualizar agora&quot; só 15 min depois da última rodada.
+      </p>
       {status.lastRunAt ? (
         <p className={status.lastResult?.ok ? "text-muted-foreground" : "text-destructive"}>
           Última atualização: {dateTime.format(new Date(status.lastRunAt))} — {status.lastResult?.message}
