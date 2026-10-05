@@ -1,6 +1,7 @@
 import { ArrowLeftIcon } from "lucide-react";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { getCurrentSubscription, planAllowsSending } from "@achadinhos/db";
+import { notFound, redirect } from "next/navigation";
 import { GroupFilters } from "@/components/canais/group-filters";
 import { PostingSwitch, SendTestForm, SyncGroupsButton } from "@/components/canais/group-controls";
 import { PageHeader } from "@/components/painel/page-header";
@@ -17,7 +18,10 @@ export default async function WhatsappGroupsPage({
 }) {
   const { channelId } = await params;
   const filters = parseGroupFilters(await searchParams);
-  const { db } = await getTenantDb();
+  const { db, user } = await getTenantDb();
+  // Plano sem WhatsApp (Catálogo): Canais mostra o aviso para mudar de plano.
+  const subscription = await getCurrentSubscription(user.tenantId);
+  if (!subscription || !planAllowsSending(subscription.plan)) redirect("/painel/canais");
   const channel = await db.channel.findUnique({ where: { id: channelId } });
   if (!channel || channel.type !== "WHATSAPP") notFound();
 

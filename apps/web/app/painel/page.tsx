@@ -46,8 +46,11 @@ export default async function InicioPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="text-sm text-muted-foreground">
-            Até {subscription.plan.maxPostsPerDay} posts por dia ·{" "}
-            {subscription.plan.maxGroups === null ? "grupos ilimitados" : `${subscription.plan.maxGroups} grupos`}
+            {subscription.plan.maxWhatsappNumbers === 0
+              ? "Catálogo, credenciais, conversão de links e mensagem pronta para copiar."
+              : `Até ${subscription.plan.maxPostsPerDay} ofertas por dia · ${
+                  subscription.plan.maxGroups === null ? "grupos ilimitados" : `${subscription.plan.maxGroups} grupos`
+                }`}
           </CardContent>
         </Card>
       ) : null}

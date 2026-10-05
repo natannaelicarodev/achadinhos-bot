@@ -1,6 +1,13 @@
 "use server";
 
-import { forTenant, getStoreCredentialSecrets, saveOfferForSending } from "@achadinhos/db";
+import {
+  forTenant,
+  getCurrentSubscription,
+  getStoreCredentialSecrets,
+  NO_SENDING_MESSAGE,
+  planAllowsSending,
+  saveOfferForSending,
+} from "@achadinhos/db";
 import {
   amazonSecretsSchema,
   canonicalAmazonShortLink,
@@ -55,6 +62,8 @@ export interface SharePreview {
   mlTag: string | null;
   /** Amazon: etiqueta do cliente para a EXTENSÃO gerar o link curto (link.amazon) pela SiteStripe. */
   amazonTag: string | null;
+  /** Plano com envio aos grupos? (o "Catálogo" só copia a mensagem) */
+  canSendToGroups: boolean;
   settings: MessageSettings;
 }
 
@@ -108,6 +117,7 @@ function buildPreview(
     notice: base.notice ?? null,
     mlTag: base.mlTag ?? null,
     amazonTag: base.amazonTag ?? null,
+    canSendToGroups: true,
     info: {
       title: info?.title ?? null,
       imageUrl: info?.imageUrl ?? null,
@@ -167,7 +177,7 @@ async function previewMercadoLivreShortLink(tenantId: string, shortLink: URL): P
 }
 
 /** "Divulgar link": identifica a loja, converte com a credencial do cliente e lê os dados do produto. */
-export async function previewPastedLinkAction(rawUrl: string): Promise<PreviewResult> {
+async function previewPastedLink(rawUrl: string): Promise<PreviewResult> {
   const { user } = await requireSession();
   const input = z.string().trim().min(8).max(2048).safeParse(rawUrl);
   const first = input.success ? parseHttpsUrl(input.data) : null;
@@ -218,7 +228,7 @@ export async function previewPastedLinkAction(rawUrl: string): Promise<PreviewRe
 }
 
 /** Catálogo: link do cliente para um produto do catálogo central. */
-export async function previewCatalogProductAction(catalogProductId: string): Promise<PreviewResult> {
+async function previewCatalogProduct(catalogProductId: string): Promise<PreviewResult> {
   const { user } = await requireSession();
   const id = z.string().min(1).max(100).safeParse(catalogProductId);
   if (!id.success) return { ok: false, error: "Produto não encontrado." };
@@ -255,6 +265,28 @@ export async function previewCatalogProductAction(catalogProductId: string): Pro
       false,
     ),
   };
+}
+
+/** O plano do tenant permite enviar aos grupos? (plano "Catálogo" não) */
+async function tenantCanSend(tenantId: string): Promise<boolean> {
+  const subscription = await getCurrentSubscription(tenantId);
+  return Boolean(subscription && planAllowsSending(subscription.plan));
+}
+
+async function withSendingPlan(result: PreviewResult): Promise<PreviewResult> {
+  if (!result.ok) return result;
+  const { user } = await requireSession();
+  return { ok: true, preview: { ...result.preview, canSendToGroups: await tenantCanSend(user.tenantId) } };
+}
+
+/** "Divulgar link": identifica a loja, converte com a credencial do cliente e lê os dados do produto. */
+export async function previewPastedLinkAction(rawUrl: string): Promise<PreviewResult> {
+  return withSendingPlan(await previewPastedLink(rawUrl));
+}
+
+/** Catálogo: link do cliente para um produto do catálogo central. */
+export async function previewCatalogProductAction(catalogProductId: string): Promise<PreviewResult> {
+  return withSendingPlan(await previewCatalogProduct(catalogProductId));
 }
 
 /**
@@ -321,6 +353,7 @@ export type SendResult = { ok: true; message: string; text: string } | { ok: fal
  */
 export async function sendToGroupsAction(input: z.input<typeof sendSchema>): Promise<SendResult> {
   const { user } = await requireSession();
+  if (!(await tenantCanSend(user.tenantId))) return { ok: false, error: NO_SENDING_MESSAGE };
   const parsed = sendSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
   const data = parsed.data;

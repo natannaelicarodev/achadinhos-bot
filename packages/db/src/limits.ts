@@ -1,6 +1,10 @@
 import type { PrismaClient } from "./generated/prisma/client";
 import { getCurrentSubscription } from "./subscription";
+import { FIRST_SENDING_PLAN_NAME } from "./plans";
 import { forTenant } from "./tenant";
+
+/** Plano sem números/grupos (ex.: "Catálogo"). */
+export const NO_SENDING_MESSAGE = `Números de WhatsApp, grupos e envios estão disponíveis a partir do plano ${FIRST_SENDING_PLAN_NAME}. Mude de plano para usar.`;
 
 /** Limite do plano atingido. `message` já vem em pt-BR para o painel. */
 export class PlanLimitError extends Error {
@@ -30,6 +34,7 @@ export async function getWhatsappUsage(tenantId: string, options: Options = {}) 
  */
 export async function assertCanAddWhatsappNumber(tenantId: string, options: Options = {}) {
   const { used, max } = await getWhatsappUsage(tenantId, options);
+  if (max === 0) throw new PlanLimitError(NO_SENDING_MESSAGE);
   if (used >= max) {
     throw new PlanLimitError(
       `Seu plano permite ${max} ${max === 1 ? "número" : "números"} de WhatsApp. Remova um número ou mude de plano.`,
@@ -43,6 +48,7 @@ export async function assertCanAddWhatsappNumber(tenantId: string, options: Opti
  */
 export async function assertChannelWithinWhatsappLimit(tenantId: string, channelId: string, options: Options = {}) {
   const plan = await requirePlan(tenantId, options);
+  if (plan.maxWhatsappNumbers === 0) throw new PlanLimitError(NO_SENDING_MESSAGE);
   const allowed = await forTenant(tenantId, options.client).channel.findMany({
     where: { type: "WHATSAPP" },
     orderBy: { createdAt: "asc" },
@@ -60,6 +66,7 @@ export async function assertChannelWithinWhatsappLimit(tenantId: string, channel
 export async function assertCanEnableGroupPosting(tenantId: string, options: Options = {}) {
   const plan = await requirePlan(tenantId, options);
   if (plan.maxGroups === null) return;
+  if (plan.maxGroups === 0 || plan.maxWhatsappNumbers === 0) throw new PlanLimitError(NO_SENDING_MESSAGE);
   const enabled = await forTenant(tenantId, options.client).group.count({ where: { postingEnabled: true } });
   if (enabled >= plan.maxGroups) {
     throw new PlanLimitError(
