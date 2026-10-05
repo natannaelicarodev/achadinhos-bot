@@ -1,4 +1,5 @@
 // Página Agendamento: dados do piloto automático e da fila (servidor).
+import { trackedLinksBase } from "./short-domain";
 import {
   autopilotStores,
   channelDailyLimitFor,
@@ -49,7 +50,7 @@ export async function loadAutopilotOverview(tenantId: string, now: Date = new Da
       where: { OR: [{ createdAt: { gte: dayStart } }, { status: { in: ["SCHEDULED", "SENDING", "AWAITING_LINK"] } }] },
       orderBy: [{ createdAt: "desc" }],
       take: 100,
-      include: { group: { select: { name: true } }, offer: { select: { title: true } }, _count: { select: { clicks: true } } },
+      include: { group: { select: { name: true, channelId: true } }, offer: { select: { title: true } }, _count: { select: { clicks: true } } },
     }),
     db.click.count({ where: { createdAt: { gte: dayStart } } }),
   ]);
@@ -113,8 +114,8 @@ export async function loadAutopilotOverview(tenantId: string, now: Date = new Da
     maxAgeHours,
     queue,
     devFast: process.env.AUTOPILOT_DEV_FAST === "true" && process.env.NODE_ENV !== "production",
-    /** Link rastreável /o/ ligado? (padrão: não; a mensagem leva o link curto da loja) */
-    trackedLinks: process.env.TRACKED_LINKS_ENABLED === "true",
+    /** "Contar cliques por grupo" valendo? (servidor oferece E o cliente ligou; padrão: link curto da loja) */
+    trackedLinks: trackedLinksBase() !== null && settings.trackClicks,
   };
 }
 

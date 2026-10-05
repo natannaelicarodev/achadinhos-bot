@@ -173,5 +173,6 @@ export const DEFAULT_AUTOPILOT = {
   groupIntervalMinSeconds: 30,
   groupIntervalMaxSeconds: 90,
   channelDailyLimit: 80,
+  trackClicks: false,
   lastPickAt: null,
 };

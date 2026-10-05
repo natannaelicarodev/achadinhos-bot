@@ -65,6 +65,7 @@ export type Settings = Pick<
   | "groupIntervalMaxSeconds"
   | "channelDailyLimit"
   | "lastPickAt"
+  | "trackClicks"
 >;
 
 export interface AutopilotDeps {
@@ -79,7 +80,10 @@ export interface AutopilotDeps {
   env?: Record<string, string | undefined>;
   /** Modo acelerado (só desenvolvimento): ritmo e intervalos curtos para testar com um grupo. */
   fast?: boolean;
-  /** Base do encurtador próprio (SHORT_LINK_BASE_URL ou APP_URL). Sem ela, vai o link de afiliado direto. */
+  /**
+   * Base do encurtador próprio (SHORT_LINK_BASE_URL, domínio separado do painel). Sem ela, ninguém
+   * usa o /o/. Com ela, só o cliente com "Contar cliques por grupo" ligado (`trackClicks`).
+   */
   shortLinkBase?: string;
 }
 
@@ -116,6 +120,31 @@ export async function targetGroups(db: TenantDb, settings: Pick<Settings, "group
     select: { id: true, channelId: true },
     orderBy: { createdAt: "asc" },
   });
+}
+
+/**
+ * Grupos que ainda cabem hoje no limite diário do número (aquecimento incluso), contando
+ * o que já saiu E o que está na fila. Número cheio = nenhum grupo dele.
+ */
+export async function groupsWithChannelRoom<G extends { id: string; channelId: string }>(
+  db: TenantDb,
+  groups: G[],
+  settings: Pick<Settings, "channelDailyLimit">,
+  now: Date,
+): Promise<G[]> {
+  const result: G[] = [];
+  for (const channelId of [...new Set(groups.map((g) => g.channelId))]) {
+    const channel = await db.channel.findFirst({ where: { id: channelId }, select: { firstConnectedAt: true, createdAt: true } });
+    if (!channel) continue;
+    const limit = channelDailyLimitFor(channel.firstConnectedAt ?? channel.createdAt, settings.channelDailyLimit, now);
+    const [sent, queued] = await Promise.all([
+      messagesSentToday(db, channelId, now),
+      db.post.count({ where: { status: STATUS_QUEUED, group: { channelId } } }),
+    ]);
+    const room = limit - sent - queued;
+    if (room > 0) result.push(...groups.filter((g) => g.channelId === channelId).slice(0, room));
+  }
+  return result;
 }
 
 /** Ofertas distintas com pelo menos 1 envio hoje (é isso que o maxPostsPerDay do plano conta). */
@@ -317,7 +346,13 @@ export async function pickForTenant(deps: AutopilotDeps, tenantId: string, now: 
   const plannedOffers = new Set([...sentToday, ...pending.map((p) => p.offerId)]);
   if (plannedOffers.size >= maxOffers) return { picked: false, reason: "limite do plano" };
 
-  const groups = await targetGroups(db, settings, { activeChannelsOnly: true });
+  const allGroups = await targetGroups(db, settings, { activeChannelsOnly: true });
+  // Número no limite do dia (aquecimento): não escolhe oferta que não teria como sair.
+  const groups = await groupsWithChannelRoom(db, allGroups, settings, now);
+  if (allGroups.length > 0 && groups.length === 0) {
+    await db.autopilotSettings.updateMany({ where: { tenantId }, data: { lastPickAt: now } });
+    return { picked: false, reason: "limite diário dos números" };
+  }
   const stores = await usableStores(db, settings, deps.env);
   // ML e Amazon no piloto só com LINK CURTO (meli.la / link.amazon), gerado pela extensão do
   // cliente: sem sinal de vida recente dela, essas lojas ficam de fora (só Shopee).
@@ -500,8 +535,9 @@ export async function dispatchChannel(
     return { channelId: channel.id, failed: post.id, error: message };
   }
 
-  // Encurtador próprio: o texto leva {base}/o/{código}; o post guarda o link de afiliado (destino do clique).
-  if (deps.shortLinkBase && link) text = text.split(link).join(`${deps.shortLinkBase}/o/${post.shortCode}`);
+  // "Contar cliques por grupo" (opção do cliente): o texto leva {base}/o/{código}; o post guarda o
+  // link da loja (destino do clique). Desligada: vai o link curto da própria loja.
+  if (deps.shortLinkBase && settings.trackClicks && link) text = text.split(link).join(`${deps.shortLinkBase}/o/${post.shortCode}`);
 
   try {
     const sent = await sendOfferToWhatsApp(

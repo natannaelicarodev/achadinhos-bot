@@ -449,6 +449,7 @@ model Post {
   @@index([tenantId, status, scheduledAt])
   @@index([groupId, store, productExternalId, createdAt])
   @@index([tenantId, sentAt])
+  @@index([tenantId, groupId, sentAt]) // mensagens enviadas por grupo (taxa de cliques, fase 8)
 }
 
 // Relações opcionais com FK composta usam NoAction: o Postgres não consegue
@@ -476,6 +477,7 @@ model Click {
   @@index([tenantId, createdAt])
   @@index([postId, ipHash, createdAt]) // repetição: mesmo IP no mesmo post conta 1 vez a cada 30 min
   @@index([tenantId, groupId, createdAt])
+  @@index([tenantId, offerId, createdAt]) // relatório de cliques por oferta (fase 8)
 }
 
 model Conversion {
@@ -502,6 +504,7 @@ model Conversion {
   @@unique([tenantId, store, externalOrderId])
   @@index([tenantId, occurredAt])
   @@index([tenantId, groupId, occurredAt])
+  @@index([tenantId, offerId, occurredAt]) // ofertas que mais venderam (fase 8)
 }
 
 model StoreCredential {
@@ -541,6 +544,7 @@ model AutopilotSettings {
   tenantId                String            @id
   tenant                  Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   enabled                 Boolean           @default(false)
+  trackClicks             Boolean           @default(false) // "Contar cliques por grupo": mensagem leva o link /o/ (fase 8)
   weekdays                Int[]             @default([0, 1, 2, 3, 4, 5, 6]) // 0 = domingo
   windowStartMinute       Int               @default(480) // 08:00 (minutos desde 00:00)
   windowEndMinute         Int               @default(1320) // 22:00

@@ -212,6 +212,9 @@ export default async function AgendamentoPage() {
                   <tbody>
                     {o.queue.map((p) => {
                       const status = POST_STATUS_LABEL[p.status];
+                      // Número já no limite do dia (aquecimento): o post espera em vez de sair no horário previsto.
+                      const channel = o.channels.find((c) => c.id === p.group.channelId);
+                      const blocked = p.status === "SCHEDULED" && channel && channel.messagesToday >= channel.dailyLimit ? channel : null;
                       return (
                         <tr key={p.id} className="border-t align-top">
                           <td className="py-2 pr-3">
@@ -225,14 +228,24 @@ export default async function AgendamentoPage() {
                           </td>
                           <td className="py-2 pr-3">{p.group.name}</td>
                           <td className="py-2 pr-3 whitespace-nowrap">
-                            {p.sentAt ? `enviado ${when(p.sentAt, now)}` : p.scheduledAt ? `previsto ${when(p.scheduledAt, now)}` : "—"}
+                            {p.sentAt
+                              ? `enviado ${when(p.sentAt, now)}`
+                              : blocked
+                                ? "esperando o limite do número"
+                                : p.scheduledAt
+                                  ? `previsto ${when(p.scheduledAt, now)}`
+                                  : "—"}
                           </td>
                           {o.trackedLinks ? (
                             <td className="py-2 pr-3 tabular-nums">{p.status === "SENT" ? p._count.clicks : "—"}</td>
                           ) : null}
                           <td className="py-2 text-xs text-muted-foreground">
                             {p.error ??
-                              (p.status === "AWAITING_LINK"
+                              (blocked
+                                ? `O número já enviou ${blocked.messagesToday} de ${blocked.dailyLimit} mensagens hoje${
+                                    blocked.warmupDay !== null ? ` (aquecimento, dia ${blocked.warmupDay} de 7)` : ""
+                                  }. ${p.source === "AUTO" ? "Post do piloto: expira sem enviar." : "Envio manual: sai amanhã, dentro da janela de horário."}`
+                                : p.status === "AWAITING_LINK"
                                 ? "Esperando a extensão gerar o link curto (Chrome aberto e ligado ao piloto em Extensão)."
                                 : p.attempts > 1
                                   ? `${p.attempts} tentativas`

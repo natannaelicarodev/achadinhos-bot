@@ -85,3 +85,25 @@ export const PLANS: readonly PlanSeed[] = [
 
 /** O plano tem números de WhatsApp, grupos e envios? (o "Catálogo" não tem) */
 export const planAllowsSending = (plan: { maxWhatsappNumbers: number }) => plan.maxWhatsappNumbers > 0;
+
+/**
+ * Plano interno das contas ADMINISTRADORAS do sistema (SYSTEM_ADMIN_EMAILS): sem limite de
+ * plano, relatórios completos. Fica fora de PLANS e com `active: false` (não aparece para
+ * clientes nem nos "disponível no plano ..."). Os limites de proteção do WhatsApp por número
+ * (aquecimento, mensagens/dia, intervalo entre grupos) continuam valendo.
+ */
+export const ADMIN_PLAN: PlanSeed & { active: false } = {
+  code: "admin",
+  name: "Administrador",
+  priceCents: 0,
+  annualPriceCents: 0,
+  maxWhatsappNumbers: 1000,
+  maxTelegramBots: 0,
+  maxGroups: null,
+  maxPostsPerDay: 1_000_000,
+  maxUsers: 1000,
+  aiEnabled: true,
+  aiCaptionsPerMonth: null,
+  reportsLevel: "FULL",
+  active: false,
+};

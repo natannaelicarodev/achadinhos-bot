@@ -323,8 +323,18 @@ describe("Amazon no piloto: só com link curto (link.amazon) da extensão do cli
 });
 
 describe("fila de envio", () => {
-  it("encurtador próprio: o texto leva {base}/o/{código do post}; o post guarda o link de afiliado", async () => {
+  it("\"Contar cliques por grupo\" desligado (padrão): vai o link da loja mesmo com o encurtador disponível", async () => {
     const { tenant, deps, tdb, socket } = await setup();
+    await product("p1");
+    const withShort = { ...deps, shortLinkBase: "https://lnk.exemplo.com" };
+    await pickForTenant(withShort, tenant.id, T0);
+    await sendAll(withShort, T0);
+    expect(await tdb.post.count({ where: { status: "SENT" } })).toBe(2);
+    expect(socket.sent.every((m) => m.text.includes("s.shopee.com.br") && !m.text.includes("/o/"))).toBe(true);
+  });
+
+  it("encurtador próprio (cliente ligou): o texto leva {base}/o/{código do post}; o post guarda o link de afiliado", async () => {
+    const { tenant, deps, tdb, socket } = await setup({ settings: { trackClicks: true } });
     await product("p1");
     const withShort = { ...deps, shortLinkBase: "https://lnk.exemplo.com" };
     await pickForTenant(withShort, tenant.id, T0);
@@ -396,15 +406,21 @@ describe("fila de envio", () => {
   });
 
   it("limite diário do número (com aquecimento) conta mensagens", async () => {
-    const { tenant, deps, socket } = await setup({
+    const { tenant, deps, socket, tdb, groups } = await setup({
       groups: 3,
       connectedSince: T0, // dia 1 do aquecimento
       settings: { channelDailyLimit: 2, offersPerHour: 12 },
     });
     await product("p1");
-    await pickForTenant(deps, tenant.id, T0);
+    // Piloto só agenda os grupos que cabem no limite do número (2 de 3).
+    expect(await pickForTenant(deps, tenant.id, T0)).toMatchObject({ picked: true, posts: 2 });
     const end = await sendAll(deps, T0);
     expect(socket.sent).toHaveLength(2);
+    // Post manual no número cheio: o envio respeita o limite.
+    const offer = (await tdb.offer.findFirstOrThrow()).id;
+    await tdb.post.create({
+      data: { tenantId: tenant.id, offerId: offer, groupId: groups[2]!.id, shortCode: `man${tenant.id.slice(-6)}`, source: "MANUAL", status: "SCHEDULED", scheduledAt: end, expiresAt: new Date(end.getTime() + DAY) },
+    });
     const results = await runDispatch(deps, end);
     expect(results).toEqual([expect.objectContaining({ skipped: "limite diário do número" })]);
   });
@@ -552,5 +568,26 @@ describe("headlines no piloto", () => {
     const manual = await tdb.post.findMany({ where: { offerId: offer.id } });
     expect(manual.length).toBe(2);
     expect(manual.every((p) => p.headline === "ESCOLHIDA À MÃO 🍳")).toBe(true);
+  });
+});
+
+describe("limite diário do número no piloto", () => {
+  it("número cheio (aquecimento) não escolhe oferta; com espaço, só os grupos que cabem", async () => {
+    // Conectado hoje: dia 1 do aquecimento = 20 mensagens.
+    const { tenant, deps, tdb, groups } = await setup({ groups: 2, connectedSince: T0 });
+    const offer = await tdb.offer.create({
+      data: { tenantId: tenant.id, store: "SHOPEE", title: "Já enviada", url: "https://shopee.com.br/x", affiliateUrl: "https://s.shopee.com.br/x" },
+    });
+    for (let i = 0; i < 19; i++) {
+      await tdb.post.create({
+        data: { tenantId: tenant.id, offerId: offer.id, groupId: groups[0]!.id, shortCode: `lim${tenant.id.slice(-4)}${i}`, status: "SENT", sentAt: T0 },
+      });
+    }
+    await product("lim-1", { score: 99 });
+    // 19 de 20: cabe só 1 grupo.
+    expect(await pickForTenant(deps, tenant.id, T0)).toMatchObject({ picked: true, posts: 1 });
+    // 19 enviadas + 1 na fila = 20 de 20: não escolhe mais.
+    await product("lim-2", { score: 98 });
+    expect(await pickForTenant(deps, tenant.id, at(31 * MIN))).toEqual({ picked: false, reason: "limite diário dos números" });
   });
 });
