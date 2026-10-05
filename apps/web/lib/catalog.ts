@@ -27,12 +27,35 @@ export const CATEGORY_LABEL: Record<CatalogCategory, string> = {
   OTHER: "Outros",
 };
 
-/** Lojas do catálogo. Mercado Livre não é minerado: o filtro leva para "Divulgar link". */
-export const CATALOG_STORES: { value: Store; label: string; className: string; href?: string }[] = [
+/**
+ * Lojas do catálogo. Mercado Livre vem da vitrine compartilhada (extensão do
+ * administrador envia a vitrine do portal de afiliados ao catálogo central).
+ */
+export const CATALOG_STORES: { value: Store; label: string; className: string }[] = [
   { value: "SHOPEE", label: "Shopee", className: "bg-orange-500 text-white" },
-  { value: "MERCADO_LIVRE", label: "Mercado Livre", className: "bg-yellow-300 text-yellow-950", href: "/painel/divulgar-link" },
+  { value: "MERCADO_LIVRE", label: "Mercado Livre", className: "bg-yellow-300 text-yellow-950" },
   { value: "AMAZON", label: "Amazon", className: "bg-neutral-900 text-white" },
 ];
+
+/** Categorias do catálogo <-> código de categoria do Mercado Livre (vitrine do portal de afiliados). */
+// Alimentos e Bebidas NÃO existe nas categorias do portal de afiliados: vem por palavra-chave.
+export const ML_CATEGORY_IDS: Partial<Record<Exclude<CatalogCategory, "OTHER">, string>> = {
+  BEAUTY: "MLB1246", // Beleza e Cuidado Pessoal (confirmado no portal)
+  HOME_KITCHEN_DECOR: "MLB1574", // Casa, Móveis e Decoração
+  ELECTRONICS: "MLB1000", // Eletrônicos, Áudio e Vídeo
+  KIDS_BABY: "MLB1384", // Bebês
+  FASHION: "MLB1430", // Calçados, Roupas e Bolsas
+  PETS: "MLB1071", // Animais
+  HEALTH: "MLB264586", // Saúde
+};
+
+/**
+ * Buscas por palavra na vitrine do ML (categorias que o portal não tem) -> categoria do catálogo.
+ * VAZIO de propósito: testado em 10/2026, o portal quase não tem comida/bebida (a busca por
+ * "chocolate", "café", "vinho"... devolve utensílios e roupas; sobraram 4 produtos após o filtro
+ * isFoodTitle). Alimentos fica com a Shopee. Para reativar: palavra -> categoria aqui.
+ */
+export const ML_KEYWORD_SEARCHES: Record<string, Exclude<CatalogCategory, "OTHER">> = {};
 
 const SHEIN_BADGE = { label: "Shein", className: "bg-black text-white" };
 
@@ -44,7 +67,7 @@ export const STORE_LABEL: Partial<Record<Store, { label: string; className: stri
 type Params = Record<string, string | string[] | undefined>;
 const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 
-const MINED_STORES = new Set<Store>(["SHOPEE", "AMAZON"]);
+const CATALOG_STORE_VALUES = new Set<Store>(["SHOPEE", "AMAZON", "MERCADO_LIVRE"]);
 const CATEGORY_VALUES = new Set<string>(CATEGORIES.map((c) => c.value));
 
 /** Filtros vindos da URL: ?busca=&categoria=&loja=&favoritos=1&pagina= (valores inválidos são ignorados). */
@@ -55,7 +78,7 @@ export function parseCatalogFilters(params: Params): CatalogFilters {
   return {
     search: first(params.busca).trim().slice(0, 100),
     category: CATEGORY_VALUES.has(category) ? (category as CatalogCategory) : null,
-    store: MINED_STORES.has(store) ? store : null,
+    store: CATALOG_STORE_VALUES.has(store) ? store : null,
     favoritesOnly: first(params.favoritos) === "1",
     page: Number.isFinite(page) && page > 0 ? Math.min(page, 1000) : 1,
   };

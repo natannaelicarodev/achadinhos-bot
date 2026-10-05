@@ -4,10 +4,12 @@ import { mercadoLivreSecretsSchema } from "@achadinhos/stores";
 import { DownloadIcon } from "lucide-react";
 import type { Metadata } from "next";
 import { ExtensionDiagnostic, ExtensionStatusBadge } from "@/components/extensao/extension-status";
+import { VitrineAdmin } from "@/components/extensao/vitrine-admin";
 import { PageHeader } from "@/components/painel/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireSession } from "@/lib/auth/current";
+import { isSystemAdmin } from "@/lib/ml-vitrine";
 
 export const metadata: Metadata = { title: "Extensão — Achadinhos Bot" };
 
@@ -75,6 +77,22 @@ export default async function ExtensaoPage() {
             <ExtensionDiagnostic mlTag={ml.success ? ml.data.mattWord : null} />
           </CardContent>
         </Card>
+        {isSystemAdmin(user.email) ? (
+          <Card className="lg:col-span-2">
+            <CardHeader>
+              <CardTitle>Vitrine do Mercado Livre no catálogo (administrador)</CardTitle>
+              <CardDescription>
+                Com a vitrine ativada, a extensão DESTE Chrome busca os mais vendidos do portal de afiliados de hora em hora
+                (enquanto o Chrome estiver aberto e logado no Mercado Livre) e coloca no catálogo de todos os clientes. Só os
+                dados dos produtos são enviados; os links continuam sendo de cada cliente. Produto que não volta na vitrine
+                em 48 horas sai do catálogo.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <VitrineAdmin />
+            </CardContent>
+          </Card>
+        ) : null}
       </div>
     </>
   );

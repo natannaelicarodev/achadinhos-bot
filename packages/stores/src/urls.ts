@@ -157,9 +157,10 @@ export function parseProductUrl(url: URL): ProductRef | null {
     return { store, externalId: asin, productUrl: `https://www.amazon.com.br/dp/${asin}` };
   }
   if (store === "MERCADO_LIVRE") {
-    const m = path.match(/(MLB)-?(\d{6,})/i);
+    // MLB123 (anúncio/catálogo) ou MLBU123 (página "up" de produto do vendedor).
+    const m = path.match(/(MLBU?)-?(\d{6,})/i);
     if (!m || !url.hostname.endsWith("mercadolivre.com.br")) return null;
-    return { store, externalId: `MLB${m[2]}`, productUrl: `${url.origin}${url.pathname}` };
+    return { store, externalId: `${m[1]!.toUpperCase()}${m[2]}`, productUrl: `${url.origin}${url.pathname}` };
   }
   if (store === "SHEIN") {
     const m = path.match(/-p-(\d+)(?:-cat-\d+)?\.html/i);

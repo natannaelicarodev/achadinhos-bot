@@ -1,7 +1,7 @@
 "use client";
 
 import { formatBRL, messageVariables, renderMessage } from "@achadinhos/stores/message";
-import { CopyIcon, ImageIcon, SendIcon } from "lucide-react";
+import { CopyIcon, ImageIcon, Loader2Icon, SendIcon } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { confirmExtensionLinkAction, sendToGroupsAction, type SharePreview } from "@/app/painel/divulgar-link/actions";
@@ -35,7 +35,9 @@ export function SharePanel({ preview, editableInfo }: { preview: SharePreview; e
   const [notice, setNotice] = useState<Notice>(
     preview.notice ? { text: preview.notice, tone: preview.shortLink ? "ok" : "warn" } : null,
   );
-  const [extensionBusy, setExtensionBusy] = useState(false);
+  // Mercado Livre sem meli.la ainda: o link longo NÃO aparece enquanto a extensão gera o curto
+  // (só fica como plano B se a extensão faltar ou falhar).
+  const [extensionBusy, setExtensionBusy] = useState(Boolean(preview.mlTag && !preview.shortLink));
   const [needsManualInfo, setNeedsManualInfo] = useState(preview.needsManualInfo);
 
   // Mercado Livre: a extensão gera o meli.la e lê o preço real no navegador do cliente.
@@ -45,7 +47,7 @@ export function SharePanel({ preview, editableInfo }: { preview: SharePreview; e
     let cancelled = false;
     void (async () => {
       setExtensionBusy(true);
-      setNotice({ text: "Gerando seu link meli.la pela extensão...", tone: "info" });
+      setNotice(null);
       const installed = await detectExtension();
       if (cancelled) return;
       if (!installed) {
@@ -58,19 +60,18 @@ export function SharePanel({ preview, editableInfo }: { preview: SharePreview; e
         return;
       }
       const productUrl = preview.product.productUrl;
-      const [created, info] = await Promise.all([
-        callExtension("ml.createLink", { productUrl, tag }),
-        callExtension("ml.productInfo", { productUrl }),
-      ]);
-      if (cancelled) return;
-      if (info.ok) {
+      // Preço real em paralelo: o meli.la não espera a leitura da página do produto.
+      void callExtension("ml.productInfo", { productUrl }).then((info) => {
+        if (cancelled || !info.ok) return;
         // Preço real (com a sessão do navegador) vale mais que o do catálogo/página lida no servidor.
         if (info.data.priceCents) setPrice(centsToInput(info.data.priceCents));
         if (info.data.originalPriceCents) setOriginalPrice(centsToInput(info.data.originalPriceCents));
         if (info.data.title) setTitle((t) => t || info.data.title || "");
         if (info.data.imageUrl) setImageUrl((u) => u || info.data.imageUrl || "");
         if (info.data.title && info.data.priceCents) setNeedsManualInfo(false);
-      }
+      });
+      const created = await callExtension("ml.createLink", { productUrl, tag });
+      if (cancelled) return;
       if (!created.ok) {
         setExtensionBusy(false);
         setNotice({ text: `Não foi possível gerar o meli.la pela extensão: ${created.error}`, tone: "warn" });
@@ -95,6 +96,7 @@ export function SharePanel({ preview, editableInfo }: { preview: SharePreview; e
     };
   }, [preview]);
 
+  const shownLink = extensionBusy ? null : link;
   const priceCents = inputToCents(price);
   const originalPriceCents = inputToCents(originalPrice);
 
@@ -105,8 +107,8 @@ export function SharePanel({ preview, editableInfo }: { preview: SharePreview; e
       originalPriceCents,
       discountPct: editableInfo ? null : preview.info.discountPct,
     };
-    return renderMessage(preview.settings.body, messageVariables(product, link ?? "(seu link de afiliado)", headline));
-  }, [title, priceCents, originalPriceCents, headline, link, editableInfo, preview]);
+    return renderMessage(preview.settings.body, messageVariables(product, shownLink ?? (extensionBusy ? "(gerando link...)" : "(seu link de afiliado)"), headline));
+  }, [title, priceCents, originalPriceCents, headline, shownLink, extensionBusy, editableInfo, preview]);
 
   const flash = (ok: boolean, text: string) => setFeedback({ ok, text });
 
@@ -134,7 +136,11 @@ export function SharePanel({ preview, editableInfo }: { preview: SharePreview; e
             ) : null}
           </p>
         ) : null}
-        {link ? (
+        {extensionBusy ? (
+          <p role="status" className="flex h-9 items-center gap-2 rounded-md border px-3 text-xs text-muted-foreground">
+            <Loader2Icon className="size-4 animate-spin" /> Gerando seu link curto meli.la...
+          </p>
+        ) : link ? (
           <div className="flex gap-2">
             <Input readOnly value={link} className="font-mono text-xs" onFocus={(e) => e.currentTarget.select()} />
             <Button
@@ -216,7 +222,7 @@ export function SharePanel({ preview, editableInfo }: { preview: SharePreview; e
       </section>
 
       <div className="flex flex-wrap gap-2">
-        <Button type="button" variant="outline" disabled={!link} onClick={async () => flash(await copyText(message), "Mensagem copiada.")}>
+        <Button type="button" variant="outline" disabled={!shownLink} onClick={async () => flash(await copyText(message), "Mensagem copiada.")}>
           <CopyIcon /> Copiar mensagem
         </Button>
         <Button

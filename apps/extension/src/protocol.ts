@@ -31,7 +31,44 @@ export const requestSchemas = {
   "ml.productInfo": z.object({ productUrl: mlProductUrl }),
   /** Diagnóstico da instalação: onde está o token de proteção e se o ML aceita o pedido. */
   "ml.diagnose": z.object({ productUrl: mlProductUrl, tag: mlTag }),
+  /** Vitrine do portal de afiliados (produtos do ML para o catálogo). */
+  "ml.hubSearch": z.object({
+    search: z.string().trim().max(100).default(""),
+    category: z.string().regex(/^MLB\d{1,10}$/, "Categoria inválida.").nullable().default(null),
+    bestSeller: z.boolean().default(true),
+    offset: z.number().int().min(0).max(2000).default(0),
+  }),
+  /**
+   * Vitrine compartilhada (só a extensão do ADMINISTRADOR): de hora em hora busca a
+   * vitrine do portal e envia os produtos ao catálogo central do painel que a ativou.
+   */
+  "vitrine.configure": z.object({
+    enabled: z.boolean(),
+    token: z.string().regex(/^[A-Za-z0-9_-]{32,128}$/, "Chave da vitrine inválida.").nullable().default(null),
+    categories: z.array(z.string().regex(/^MLB\d{1,10}$/, "Categoria inválida.")).max(20).default([]),
+    /** Palavras-chave (categorias que o portal não tem, ex.: Alimentos). */
+    searches: z.array(z.string().trim().min(2).max(50)).max(30).default([]),
+  }),
+  "vitrine.status": z.object({}),
+  "vitrine.runNow": z.object({}),
 } as const;
+
+/** Produto da vitrine do Mercado Livre (já no formato dos cards do catálogo). */
+export interface HubItem {
+  id: string;
+  productUrl: string;
+  title: string;
+  imageUrl: string | null;
+  priceCents: number;
+  originalPriceCents: number | null;
+  discountLabel: string | null;
+  commissionPct: number | null;
+  extraCommission: boolean;
+  rating: number | null;
+  soldText: string | null;
+  soldCount: number | null;
+  highlight: string | null;
+}
 
 export type RequestType = keyof typeof requestSchemas;
 export type RequestPayload<T extends RequestType> = z.infer<(typeof requestSchemas)[T]>;
@@ -46,6 +83,20 @@ export interface ResponseMap {
     originalPriceCents: number | null;
   };
   "ml.diagnose": { steps: { step: string; ok: boolean; detail: string }[] };
+  "ml.hubSearch": { items: HubItem[]; hasMore: boolean };
+  "vitrine.configure": VitrineStatus;
+  "vitrine.status": VitrineStatus;
+  "vitrine.runNow": VitrineStatus;
+}
+
+/** Estado da vitrine compartilhada nesta extensão (nunca devolve a chave). */
+export interface VitrineStatus {
+  enabled: boolean;
+  /** Painel que recebe os produtos (origem que ativou). */
+  endpoint: string | null;
+  running: boolean;
+  lastRunAt: string | null;
+  lastResult: { ok: boolean; message: string } | null;
 }
 
 export type ExtensionResult<T extends RequestType> = { ok: true; data: ResponseMap[T] } | { ok: false; error: string };

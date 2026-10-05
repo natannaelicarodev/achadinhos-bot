@@ -86,18 +86,19 @@ export default async function CatalogoPage({
           <Chip href={catalogHref(filters, { store: null })} active={filters.store === null && !filters.favoritesOnly}>
             Todas as lojas
           </Chip>
-          {CATALOG_STORES.map((s) =>
-            s.href ? (
-              <Chip key={s.value} href={s.href} active={false}>
-                {s.label} <span className="text-xs text-muted-foreground">· divulgar por link</span>
-              </Chip>
-            ) : (
-              <Chip key={s.value} href={catalogHref(filters, { store: filters.store === s.value ? null : s.value })} active={filters.store === s.value}>
-                {s.label}
-              </Chip>
-            ),
-          )}
-          <Chip href={catalogHref(filters, { favoritesOnly: !filters.favoritesOnly })} active={filters.favoritesOnly}>
+          {CATALOG_STORES.map((s) => (
+            <Chip
+              key={s.value}
+              href={catalogHref(filters, { store: filters.store === s.value ? null : s.value })}
+              active={filters.store === s.value}
+            >
+              {s.label}
+            </Chip>
+          ))}
+          <Chip
+            href={catalogHref(filters, { favoritesOnly: !filters.favoritesOnly })}
+            active={filters.favoritesOnly}
+          >
             <HeartIcon className={cn("size-4", filters.favoritesOnly && "fill-current")} /> Meus favoritos
           </Chip>
         </div>

@@ -6,6 +6,11 @@ import { forTenant } from "./tenant";
 /** Nota mínima para entrar (ou continuar) no catálogo, quando a loja informa a nota. */
 export const MIN_CATALOG_RATING = 4.5;
 export const CATALOG_PAGE_SIZE = 24;
+/**
+ * Mercado Livre vem da vitrine compartilhada (extensão do administrador), não de um
+ * minerador com "reconferir": produto que não volta na vitrine em 48h some do catálogo.
+ */
+export const MERCADO_LIVRE_STALE_HOURS = 48;
 
 /** Produto como vem de um minerador (já convertido para centavos e %). */
 export interface MinedProduct {
@@ -192,15 +197,21 @@ export interface CatalogFilters {
 }
 
 /** Página do catálogo para o tenant (com a marcação de favorito e de oferta criada). */
-export async function listCatalog(tenantId: string, filters: CatalogFilters, options: { client?: PrismaClient } = {}) {
+export async function listCatalog(
+  tenantId: string,
+  filters: CatalogFilters,
+  options: { client?: PrismaClient; now?: Date } = {},
+) {
   const db = forTenant(tenantId, options.client);
   const terms = normalizeSearchText(filters.search).split(" ").filter(Boolean);
+  const mlCutoff = new Date((options.now ?? new Date()).getTime() - MERCADO_LIVRE_STALE_HOURS * 3_600_000);
 
   const where: Prisma.CatalogProductWhereInput = {
     active: true,
     ...(filters.category ? { category: filters.category } : {}),
     ...(filters.store ? { store: filters.store } : {}),
     ...(terms.length ? { AND: terms.map((term) => ({ searchText: { contains: term } })) } : {}),
+    NOT: { store: "MERCADO_LIVRE", lastSeenAt: { lt: mlCutoff } },
   };
   if (filters.favoritesOnly) {
     const favorites = await db.favorite.findMany({ select: { catalogProductId: true } });
@@ -247,7 +258,7 @@ export async function toggleFavorite(tenantId: string, catalogProductId: string,
 
 /** Última execução da mineração por loja (rodapé do catálogo). */
 export async function getLatestMiningRuns(client: PrismaClient) {
-  const stores: Store[] = ["SHOPEE", "AMAZON"];
+  const stores: Store[] = ["SHOPEE", "AMAZON", "MERCADO_LIVRE"];
   return Promise.all(
     stores.map((store) =>
       client.catalogMiningRun.findFirst({ where: { store }, orderBy: { startedAt: "desc" } }),

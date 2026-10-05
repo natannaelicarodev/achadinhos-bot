@@ -60,6 +60,12 @@ describe("identificação da loja e do produto pela URL", () => {
       productUrl: "https://produto.mercadolivre.com.br/MLB-1234567890-air-fryer-_JM",
     });
     expect(parseProductUrl(u("https://www.mercadolivre.com.br/air-fryer/p/MLB19876543"))?.externalId).toBe("MLB19876543");
+    // Página "up" (produto do vendedor), como vem da vitrine do portal de afiliados.
+    expect(parseProductUrl(u("https://www.mercadolivre.com.br/chaleira-eletrica-inox/up/MLBU3920036187"))).toEqual({
+      store: "MERCADO_LIVRE",
+      externalId: "MLBU3920036187",
+      productUrl: "https://www.mercadolivre.com.br/chaleira-eletrica-inox/up/MLBU3920036187",
+    });
   });
 
   it("Shein: br.shein.com e m.shein.com/br viram br.shein.com", () => {

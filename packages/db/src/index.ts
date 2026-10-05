@@ -31,6 +31,7 @@ export {
 export {
   MIN_CATALOG_RATING,
   CATALOG_PAGE_SIZE,
+  MERCADO_LIVRE_STALE_HOURS,
   normalizeSearchText,
   computeCatalogScore,
   stripAffiliateParams,

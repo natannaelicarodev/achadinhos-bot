@@ -219,6 +219,19 @@ describe("catálogo no painel", () => {
     expect(all.items[0]?.externalId).toBe("p-fone");
   });
 
+  it("Mercado Livre (vitrine compartilhada) entra em Todas as lojas e some após 48h sem aparecer", async () => {
+    const t = await newTenant("cat-ml");
+    const now = new Date("2026-10-04T12:00:00Z");
+    const ml = (id: string) => mined(id, { store: "MERCADO_LIVRE", title: `Garrafa térmica ${id}`, productUrl: `https://www.mercadolivre.com.br/p/${id}` });
+    await saveMinedProducts(db.prisma, [ml("MLB111")], new Date(now.getTime() - 49 * HOUR));
+    await saveMinedProducts(db.prisma, [ml("MLB222")], new Date(now.getTime() - 2 * HOUR));
+    const opts = { client: db.prisma, now };
+    const all = await listCatalog(t.id, filters({ search: "garrafa termica" }), opts);
+    expect(all.items.map((p) => p.externalId)).toEqual(["MLB222"]);
+    expect((await listCatalog(t.id, filters({ store: "MERCADO_LIVRE" }), opts)).items.map((p) => p.externalId)).toEqual(["MLB222"]);
+    await db.prisma.catalogProduct.updateMany({ where: { store: "MERCADO_LIVRE" }, data: { active: false } });
+  });
+
   it("pagina de 24 em 24 e esconde inativos", async () => {
     const t = await newTenant("cat-pagina");
     const page1 = await listCatalog(t.id, filters(), { client: db.prisma });
