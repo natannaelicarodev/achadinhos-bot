@@ -46,6 +46,18 @@ describe("cadastro", () => {
     expect(sub?.trialEndsAt?.getTime()).toBe(now.getTime() + 7 * DAY);
   });
 
+  it("e-mail administrador (SYSTEM_ADMIN_EMAILS) já nasce no plano Administrador, sem trial", async () => {
+    const data = signUpSchema.parse({ tenantName: "Loja da Dona", name: "Dona", email: "Dona@Teste.com", password: "senha-forte-123" });
+    const result = await signUp(db.prisma, data, new Date("2026-10-04T12:00:00Z"), "outra@x.com, dona@teste.com");
+    expect(result.ok).toBe(true);
+    const user = await db.prisma.user.findUniqueOrThrow({
+      where: { email: "dona@teste.com" },
+      include: { tenant: { include: { subscriptions: { include: { plan: true } } } } },
+    });
+    expect(user.tenant.subscriptions).toHaveLength(1);
+    expect(user.tenant.subscriptions[0]).toMatchObject({ status: "ACTIVE", trialEndsAt: null, plan: { code: "admin" } });
+  });
+
   it("normaliza e-mail e recusa duplicado", async () => {
     expect(input("  ANA@Teste.com ").email).toBe("ana@teste.com");
     const again = await signUp(db.prisma, input("ANA@teste.com"));

@@ -37,3 +37,13 @@ export function shortDomainRedirect(requestUrl: URL, host: string | null, env: R
   if (requestUrl.pathname.startsWith(SHORT_LINK_PATH)) return null;
   return new URL(`${requestUrl.pathname}${requestUrl.search}`, appUrl).toString();
 }
+
+/**
+ * Base do link rastreável quando o servidor oferece "Contar cliques por grupo":
+ * TRACKED_LINKS_ENABLED=true E o domínio de links curtos (SHORT_LINK_BASE_URL, nunca o do painel).
+ * null = opção indisponível. Mesma regra do worker (apps/worker/src/index.ts).
+ */
+export function trackedLinksBase(env: Record<string, string | undefined> = process.env): string | null {
+  const base = env.SHORT_LINK_BASE_URL?.trim();
+  return env.TRACKED_LINKS_ENABLED === "true" && base ? base.replace(/\/+$/, "") : null;
+}

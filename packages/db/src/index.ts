@@ -13,7 +13,8 @@ export {
   type StoreSecrets,
 } from "./store-credentials";
 export { startTrial, getCurrentSubscription, markExpiredTrialsPastDue, TRIAL_DAYS } from "./subscription";
-export { PLANS, TRIAL_PLAN_CODE, FIRST_SENDING_PLAN_NAME, planAllowsSending, type PlanSeed } from "./plans";
+export { PLANS, ADMIN_PLAN, TRIAL_PLAN_CODE, FIRST_SENDING_PLAN_NAME, planAllowsSending, type PlanSeed } from "./plans";
+export { grantAdminPlan, isAdminEmail, parseAdminEmails, syncAdminAccounts, upsertAdminPlan } from "./admin";
 export {
   PlanLimitError,
   NO_SENDING_MESSAGE,

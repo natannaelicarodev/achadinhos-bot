@@ -1,108 +1,341 @@
-import { forTenant } from "@achadinhos/db";
+import { forTenant, getCurrentSubscription, planAllowsSending, type ReportsLevel } from "@achadinhos/db";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { PageHeader } from "@/components/painel/page-header";
+import { HeadlineReport } from "@/components/relatorios/headline-report";
+import { CsvButton, DailyChart, Locked, PeriodFilter, SimpleTable } from "@/components/relatorios/report-parts";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireSession } from "@/lib/auth/current";
 import { formatBRL } from "@/lib/catalog";
-import { HeadlineReport } from "@/components/relatorios/headline-report";
 import { isSystemAdmin } from "@/lib/ml-vitrine";
+import { canSee, loadReportData, parsePeriod, planNameFor, storeLabel, type SalesTotals } from "@/lib/reports";
+import { trackedLinksBase } from "@/lib/short-domain";
 
 export const metadata: Metadata = { title: "Relatórios — Achadinhos Bot" };
 
-const DAY = 24 * 60 * 60_000;
 const dateTime = new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: "America/Sao_Paulo" });
+const decimal = (n: number, digits = 1) => n.toLocaleString("pt-BR", { maximumFractionDigits: digits, minimumFractionDigits: 0 });
 
-/** Status da Shopee -> grupo simples para o painel. */
-function statusKind(status: string | null): "done" | "canceled" | "pending" {
-  if (status && /complet|conclu|valid|paid_out/i.test(status)) return "done";
-  if (status && /cancel|invalid|fraud|refund|return|unpaid/i.test(status)) return "canceled";
-  return "pending";
-}
+const ML_PORTAL_URL = "https://www.mercadolivre.com.br/afiliados/hub";
+const AMAZON_PORTAL_URL = "https://associados.amazon.com.br/p/reporting/earnings";
 
 const STORE_REPORTS = [
   {
     store: "MERCADO_LIVRE",
-    title: "Mercado Livre: cliques e vendas",
+    title: "Mercado Livre: cliques e vendas da conta",
     description:
-      "Números do seu painel de afiliados do Mercado Livre, lidos pela extensão no seu Chrome de hora em hora (total da conta; o Mercado Livre separa por etiqueta, não por grupo).",
+      "Números do painel de afiliados da conta do Mercado Livre logada no Chrome onde a SUA extensão está ligada ao painel (só a sua conta do painel recebe estes dados). Total da conta: o Mercado Livre separa por etiqueta, não por grupo.",
     login: "Chrome aberto e logado no Mercado Livre",
+    notice: "Vendas do Mercado Livre por grupo e por oferta: consulte o seu portal de afiliados.",
+    portal: ML_PORTAL_URL,
+    portalLabel: "Abrir o portal de afiliados",
   },
   {
     store: "AMAZON",
-    title: "Amazon: cliques e vendas",
+    title: "Amazon: cliques e vendas da conta",
     description:
-      "Números do Relatórios do seu Associados da Amazon, lidos pela extensão no seu Chrome de hora em hora (total da conta, até ontem; a Amazon separa por etiqueta, não por grupo).",
+      "Números do Relatórios do Associados, lidos pela sua extensão só quando a conta logada tem a mesma etiqueta das suas Credenciais. Total da conta, até ontem: a Amazon separa por etiqueta, não por grupo.",
     login: "Chrome aberto e logado no Associados da Amazon",
+    notice: "Vendas da Amazon por grupo e por oferta: consulte o seu Associados.",
+    portal: AMAZON_PORTAL_URL,
+    portalLabel: "Abrir o Associados",
   },
 ] as const;
 
-interface Totals {
-  orders: number;
-  amountCents: number;
-  commissionCents: number;
-  pendingCents: number;
-  canceled: number;
-}
-const empty = (): Totals => ({ orders: 0, amountCents: 0, commissionCents: 0, pendingCents: 0, canceled: 0 });
+const salesCells = (t: SalesTotals) => [t.orders, formatBRL(t.amountCents), formatBRL(t.commissionCents), formatBRL(t.pendingCents), t.canceled];
+const SALES_HEADERS = ["Pedidos", "Vendas", "Comissão confirmada", "Comissão pendente", "Cancelados"];
 
-export default async function RelatoriosPage() {
+/** Plano Catálogo: convite para o Iniciante, explicando o que cada plano libera. */
+function Invite() {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Relatórios fazem parte dos planos com envio aos grupos</CardTitle>
+        <CardDescription>
+          No plano Catálogo você copia as mensagens e divulga por fora. Com o plano {planNameFor("daily")} o painel envia aos
+          seus grupos e passa a acompanhar os resultados.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-3 text-sm">
+        <ul className="grid gap-1">
+          <li>
+            <strong>{planNameFor("daily")}:</strong> cliques por dia e por loja, vendas e comissão da Shopee por grupo, números
+            do Mercado Livre e da Amazon da sua conta.
+          </li>
+          <li>
+            <strong>{planNameFor("groups")}:</strong> + cliques e taxa de cliques por grupo, cliques por oferta e as ofertas que
+            mais venderam.
+          </li>
+          <li>
+            <strong>{planNameFor("csv")}:</strong> tudo isso + exportar as tabelas em CSV (Excel).
+          </li>
+        </ul>
+        <Button render={<Link href="/painel/configuracoes#plano" />} nativeButton={false} className="w-fit">
+          Conhecer o plano {planNameFor("daily")}
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+export default async function RelatoriosPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const { user } = await requireSession();
+  const subscription = await getCurrentSubscription(user.tenantId);
+  const admin = isSystemAdmin(user.email);
+
+  if (!subscription || !planAllowsSending(subscription.plan)) {
+    return (
+      <>
+        <PageHeader title="Relatórios" description="Cliques, vendas e comissões das suas divulgações." />
+        <div className="grid gap-4">
+          <Invite />
+          {admin ? <HeadlineReport /> : null}
+        </div>
+      </>
+    );
+  }
+
+  const level: ReportsLevel = subscription.plan.reportsLevel;
+  const period = parsePeriod(await searchParams);
   const db = forTenant(user.tenantId);
-  const now = Date.now();
-  const since30 = new Date(now - 30 * DAY);
-  const [conversions, groups, credential, snapshots, storeCredentials] = await Promise.all([
-    db.conversion.findMany({
-      where: { store: "SHOPEE", occurredAt: { gte: since30 } },
-      select: { groupId: true, amountCents: true, commissionCents: true, status: true, occurredAt: true, updatedAt: true },
-    }),
-    db.group.findMany({ select: { id: true, name: true } }),
+  const [data, autopilot, shopeeCredential, snapshots, storeCredentials] = await Promise.all([
+    loadReportData(db, period),
+    db.autopilotSettings.findUnique({ where: { tenantId: user.tenantId }, select: { trackClicks: true } }),
     db.storeCredential.findFirst({ where: { store: "SHOPEE" }, select: { id: true } }),
     db.storeReportSnapshot.findMany({ where: { store: { in: ["MERCADO_LIVRE", "AMAZON"] } }, orderBy: { rangeDays: "asc" } }),
     db.storeCredential.findMany({ where: { store: { in: ["MERCADO_LIVRE", "AMAZON"] } }, select: { store: true } }),
   ]);
-  const groupName = new Map(groups.map((g) => [g.id, g.name]));
-  const lastSync = conversions.reduce<Date | null>((max, c) => (!max || c.updatedAt > max ? c.updatedAt : max), null);
-
-  const summarize = (days: number) => {
-    const since = now - days * DAY;
-    const byGroup = new Map<string, Totals>();
-    const total = empty();
-    for (const c of conversions) {
-      if (c.occurredAt.getTime() < since) continue;
-      const key = c.groupId ?? "";
-      const t = byGroup.get(key) ?? empty();
-      for (const target of [t, total]) {
-        const kind = statusKind(c.status);
-        if (kind === "canceled") {
-          target.canceled += 1;
-          continue;
-        }
-        target.orders += 1;
-        target.amountCents += c.amountCents;
-        if (kind === "done") target.commissionCents += c.commissionCents;
-        else target.pendingCents += c.commissionCents;
-      }
-      byGroup.set(key, t);
-    }
-    const rows = [...byGroup.entries()]
-      .map(([groupId, t]) => ({ name: groupId ? (groupName.get(groupId) ?? "Grupo removido") : "Fora dos grupos (links divulgados por fora)", ...t }))
-      .sort((a, b) => b.commissionCents + b.pendingCents - (a.commissionCents + a.pendingCents));
-    return { total, rows };
-  };
+  const csv = canSee(level, "csv");
+  const trackingOn = Boolean(trackedLinksBase() && autopilot?.trackClicks);
+  const showClicks = trackingOn || data.clicks.total > 0;
 
   return (
     <>
-      <PageHeader title="Relatórios" description="Vendas e comissões das suas divulgações." />
+      <PageHeader title="Relatórios" description="Cliques, vendas e comissões das suas divulgações." />
       <div className="grid gap-4">
+        <PeriodFilter period={period} />
+
+        {/* ---------- Cliques ---------- */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Cliques nos seus links</CardTitle>
+            <CardDescription>
+              Contados pelo nosso link curto das mensagens enviadas aos grupos (robôs de pré-visualização e cliques repetidos
+              da mesma pessoa em 30 minutos não contam).
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4 text-sm">
+            {!showClicks ? (
+              trackedLinksBase() ? (
+                <div className="grid gap-2">
+                  <p className="text-muted-foreground">
+                    Hoje as suas mensagens levam o link curto da própria loja, e a Shopee, o Mercado Livre e a Amazon não
+                    informam os cliques por grupo. Para ver cliques por dia, grupo, loja e oferta, ligue &quot;Contar cliques
+                    por grupo&quot;.
+                  </p>
+                  <Button render={<Link href="/painel/configuracoes#cliques" />} nativeButton={false} size="sm" variant="outline" className="w-fit">
+                    Ligar em Configurações
+                  </Button>
+                </div>
+              ) : (
+                <p className="text-muted-foreground">A contagem de cliques ainda não está disponível. Por enquanto, veja as vendas abaixo.</p>
+              )
+            ) : (
+              <>
+                {!trackingOn ? (
+                  <p className="text-xs text-amber-700 dark:text-amber-400">
+                    &quot;Contar cliques por grupo&quot; está desligado: os cliques abaixo são de mensagens enviadas antes.
+                  </p>
+                ) : null}
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p>
+                    <strong className="text-2xl">{data.clicks.total}</strong> {data.clicks.total === 1 ? "clique" : "cliques"} no
+                    período
+                  </p>
+                  <CsvButton table="dias" period={period} allowed={csv} />
+                </div>
+                <DailyChart data={data.clicks.byDay} />
+
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <div className="grid content-start gap-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h3 className="font-semibold">Por loja</h3>
+                      <CsvButton table="lojas" period={period} allowed={csv} />
+                    </div>
+                    <SimpleTable
+                      headers={["Loja", "Cliques"]}
+                      rows={data.clicks.byStore.map((s) => [storeLabel(s.store), s.clicks])}
+                      empty="Nenhum clique no período."
+                    />
+                  </div>
+                  <div className="grid content-start gap-2">
+                    {canSee(level, "groups") ? (
+                      <>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <h3 className="font-semibold">Por grupo</h3>
+                          <CsvButton table="grupos" period={period} allowed={csv} />
+                        </div>
+                        <SimpleTable
+                          headers={["Grupo", "Cliques"]}
+                          rows={data.clicks.byGroup.map((g) => [g.name, g.clicks])}
+                          empty="Nenhum clique no período."
+                        />
+                      </>
+                    ) : (
+                      <Locked feature="groups" what="Cliques por grupo" />
+                    )}
+                  </div>
+                </div>
+
+                {canSee(level, "offers") ? (
+                  <div className="grid gap-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h3 className="font-semibold">Por oferta</h3>
+                      <CsvButton table="ofertas-cliques" period={period} allowed={csv} />
+                    </div>
+                    <SimpleTable
+                      headers={["Oferta", "Loja", "Cliques"]}
+                      rows={data.clicks.byOffer.slice(0, 50).map((o) => [o.title, storeLabel(o.store), o.clicks])}
+                      empty="Nenhum clique no período."
+                    />
+                  </div>
+                ) : (
+                  <Locked feature="offers" what="Cliques por oferta" />
+                )}
+              </>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* ---------- Taxa de cliques por grupo ---------- */}
+        {showClicks ? (
+          canSee(level, "groups") ? (
+            <Card>
+              <CardHeader>
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="grid gap-1.5">
+                    <CardTitle>Taxa de cliques por grupo</CardTitle>
+                    <CardDescription>Mensagens enviadas pelo painel no período e quantos cliques elas tiveram.</CardDescription>
+                  </div>
+                  <CsvButton table="taxa" period={period} allowed={csv} />
+                </div>
+              </CardHeader>
+              <CardContent className="grid gap-2">
+                <SimpleTable
+                  headers={["Grupo", "Mensagens", "Cliques", "Cliques por mensagem", "Membros", "% dos membros"]}
+                  rows={data.rates.map((r) => [
+                    r.name,
+                    r.messages,
+                    r.clicks,
+                    r.clicksPerMessage === null ? "—" : decimal(r.clicksPerMessage, 2),
+                    r.members ?? "—",
+                    r.pctMembers === null ? (
+                      "—"
+                    ) : (
+                      <abbr
+                        key="pct"
+                        className="cursor-help no-underline"
+                        title="Aproximado: cliques ÷ (mensagens × membros). A mesma pessoa pode clicar mais de uma vez (em horários diferentes) e o número de membros muda com o tempo."
+                      >
+                        ≈ {decimal(r.pctMembers, 1)}%
+                      </abbr>
+                    ),
+                  ])}
+                  empty="Nenhuma mensagem enviada aos grupos no período."
+                />
+                <p className="text-xs text-muted-foreground">
+                  ≈ % dos membros é aproximado: cliques ÷ (mensagens × membros do grupo). A mesma pessoa pode clicar mais de uma
+                  vez em horários diferentes, e o número de membros muda com o tempo.
+                </p>
+              </CardContent>
+            </Card>
+          ) : (
+            <Locked feature="groups" what="Taxa de cliques por grupo" />
+          )
+        ) : null}
+
+        {/* ---------- Shopee: vendas por grupo ---------- */}
+        <Card>
+          <CardHeader>
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div className="grid gap-1.5">
+                <CardTitle>Shopee: vendas por grupo</CardTitle>
+                <CardDescription>
+                  Relatório oficial de vendas da Shopee, ligado ao grupo pelo seu link (subIds). Atualiza de hora em hora.
+                  {data.shopee.lastSync ? ` Atualizado em ${dateTime.format(data.shopee.lastSync)}.` : ""}
+                </CardDescription>
+              </div>
+              {shopeeCredential ? <CsvButton table="vendas-grupos" period={period} allowed={csv} /> : null}
+            </div>
+          </CardHeader>
+          <CardContent className="grid gap-3 text-sm">
+            {!shopeeCredential ? (
+              <p className="text-muted-foreground">
+                Configure a credencial da Shopee em{" "}
+                <Link href="/painel/credenciais" className="underline underline-offset-4">
+                  Credenciais
+                </Link>{" "}
+                para ver as vendas.
+              </p>
+            ) : (
+              <>
+                <p>
+                  <strong>{data.shopee.total.orders}</strong> pedidos · vendas {formatBRL(data.shopee.total.amountCents)} · comissão{" "}
+                  <strong>{formatBRL(data.shopee.total.commissionCents)}</strong> confirmada
+                  {data.shopee.total.pendingCents > 0 ? ` + ${formatBRL(data.shopee.total.pendingCents)} pendente` : ""}
+                  {data.shopee.total.canceled > 0 ? ` · ${data.shopee.total.canceled} cancelado(s)` : ""}
+                </p>
+                <SimpleTable
+                  headers={["Grupo", ...SALES_HEADERS]}
+                  rows={data.shopee.byGroup.map((g) => [g.name, ...salesCells(g)])}
+                  empty="Nenhuma venda da Shopee pelos seus links neste período."
+                />
+              </>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* ---------- Ofertas que mais venderam ---------- */}
+        {canSee(level, "offers") ? (
+          <Card>
+            <CardHeader>
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div className="grid gap-1.5">
+                  <CardTitle>Ofertas que mais venderam</CardTitle>
+                  <CardDescription>
+                    Vendas ligadas à oferta pela loja (hoje só a Shopee informa o produto vendido). Ordem: comissão confirmada
+                    + pendente.
+                  </CardDescription>
+                </div>
+                <CsvButton table="ofertas-vendas" period={period} allowed={csv} />
+              </div>
+            </CardHeader>
+            <CardContent>
+              <SimpleTable
+                headers={["Oferta", "Loja", "Cliques", ...SALES_HEADERS]}
+                rows={data.topOffers.slice(0, 50).map((o) => [o.title, storeLabel(o.store), showClicks ? o.clicks : "—", ...salesCells(o)])}
+                empty="Nenhuma venda ligada a uma oferta neste período."
+              />
+            </CardContent>
+          </Card>
+        ) : (
+          <Locked feature="offers" what="Ofertas que mais venderam" />
+        )}
+
+        {/* ---------- Mercado Livre e Amazon (total da conta, pela extensão) ---------- */}
         {STORE_REPORTS.map((store) => {
           const list = snapshots.filter((x) => x.store === store.store);
           const hasCredential = storeCredentials.some((c) => c.store === store.store);
+          const updatedAt = list.reduce<Date | null>((max, s) => (!max || s.fetchedAt > max ? s.fetchedAt : max), null);
           return (
             <Card key={store.store}>
               <CardHeader>
                 <CardTitle>{store.title}</CardTitle>
-                <CardDescription>{store.description}</CardDescription>
+                <CardDescription>
+                  {store.description}
+                  {updatedAt ? ` Atualizado em ${dateTime.format(updatedAt)}.` : ""}
+                </CardDescription>
               </CardHeader>
               <CardContent className="grid gap-4 text-sm">
                 {list.length === 0 ? (
@@ -117,7 +350,7 @@ export default async function RelatoriosPage() {
                 ) : (
                   <div className="grid gap-3 md:grid-cols-2">
                     {list.map((s) => {
-                      const conversion = s.clicks > 0 ? ((s.orders / s.clicks) * 100).toLocaleString("pt-BR", { maximumFractionDigits: 2 }) : "0";
+                      const conversion = s.clicks > 0 ? decimal((s.orders / s.clicks) * 100, 2) : "0";
                       return (
                         <div key={s.id} className="grid gap-1 rounded-lg border p-3">
                           <p className="font-semibold">Últimos {s.rangeDays} dias</p>
@@ -135,82 +368,25 @@ export default async function RelatoriosPage() {
                             Conversão {conversion}%
                             {s.notEffectiveSalesCents > 0
                               ? ` · ${store.store === "AMAZON" ? "devolvidos" : "não efetivadas"} ${formatBRL(s.notEffectiveSalesCents)}`
-                              : ""}{" "}
-                            · lido {dateTime.format(s.fetchedAt)}
+                              : ""}
                           </p>
                         </div>
                       );
                     })}
                   </div>
                 )}
+                <p className="text-muted-foreground">
+                  {store.notice}{" "}
+                  <a href={store.portal} target="_blank" rel="noreferrer" className="underline underline-offset-4">
+                    {store.portalLabel}
+                  </a>
+                </p>
               </CardContent>
             </Card>
           );
         })}
-        {[7, 30].map((days) => {
-          const { total, rows } = summarize(days);
-          return (
-            <Card key={days}>
-              <CardHeader>
-                <CardTitle>Shopee: vendas por grupo (últimos {days} dias)</CardTitle>
-                <CardDescription>
-                  Dados oficiais do relatório de vendas da Shopee, ligados ao grupo pelo seu link. A Shopee não informa cliques
-                  pela API, só vendas.
-                  {lastSync ? ` Atualizado ${dateTime.format(lastSync)}.` : ""}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="grid gap-4 text-sm">
-                {!credential ? (
-                  <p className="text-muted-foreground">
-                    Configure a credencial da Shopee em{" "}
-                    <Link href="/painel/credenciais" className="underline underline-offset-4">
-                      Credenciais
-                    </Link>{" "}
-                    para ver as vendas.
-                  </p>
-                ) : rows.length === 0 ? (
-                  <p className="text-muted-foreground">Nenhuma venda da Shopee pelos seus links neste período (o relatório atualiza de hora em hora).</p>
-                ) : (
-                  <>
-                    <p>
-                      <strong>{total.orders}</strong> {total.orders === 1 ? "pedido" : "pedidos"} · {formatBRL(total.amountCents)} em vendas ·
-                      comissão <strong>{formatBRL(total.commissionCents)}</strong> confirmada
-                      {total.pendingCents > 0 ? ` + ${formatBRL(total.pendingCents)} pendente` : ""}
-                      {total.canceled > 0 ? ` · ${total.canceled} cancelado(s)` : ""}
-                    </p>
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left">
-                        <thead className="text-xs text-muted-foreground">
-                          <tr>
-                            <th className="py-2 pr-3 font-medium">Grupo</th>
-                            <th className="py-2 pr-3 font-medium">Pedidos</th>
-                            <th className="py-2 pr-3 font-medium">Vendas</th>
-                            <th className="py-2 pr-3 font-medium">Comissão confirmada</th>
-                            <th className="py-2 pr-3 font-medium">Comissão pendente</th>
-                            <th className="py-2 font-medium">Cancelados</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {rows.map((r) => (
-                            <tr key={r.name} className="border-t">
-                              <td className="py-2 pr-3">{r.name}</td>
-                              <td className="py-2 pr-3 tabular-nums">{r.orders}</td>
-                              <td className="py-2 pr-3 tabular-nums">{formatBRL(r.amountCents)}</td>
-                              <td className="py-2 pr-3 tabular-nums">{formatBRL(r.commissionCents)}</td>
-                              <td className="py-2 pr-3 tabular-nums">{formatBRL(r.pendingCents)}</td>
-                              <td className="py-2 tabular-nums">{r.canceled}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </>
-                )}
-              </CardContent>
-            </Card>
-          );
-        })}
-        {isSystemAdmin(user.email) ? <HeadlineReport /> : null}
+
+        {admin ? <HeadlineReport /> : null}
       </div>
     </>
   );

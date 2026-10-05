@@ -1,10 +1,11 @@
 "use server";
 
-import { forTenant } from "@achadinhos/db";
+import { forTenant, getCurrentSubscription, NO_SENDING_MESSAGE, planAllowsSending } from "@achadinhos/db";
 import { validateTemplate } from "@achadinhos/stores/message";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireSession } from "@/lib/auth/current";
+import { trackedLinksBase } from "@/lib/short-domain";
 
 export type TemplateResult = { ok: true; message: string } | { ok: false; error: string };
 
@@ -49,4 +50,28 @@ export async function resetTemplateAction(): Promise<TemplateResult> {
   await forTenant(user.tenantId).messageTemplate.deleteMany({ where: { tenantId: user.tenantId } });
   revalidatePath("/painel/configuracoes");
   return { ok: true, message: "Modelo padrão restaurado." };
+}
+
+/** "Contar cliques por grupo" (fase 8): só o dono, plano com envio e servidor com o encurtador. */
+export async function setTrackClicksAction(enabled: boolean): Promise<TemplateResult> {
+  const { user } = await requireSession();
+  if (user.role !== "OWNER") return { ok: false, error: "Só o dono da conta pode alterar." };
+  const value = z.boolean().safeParse(enabled);
+  if (!value.success) return { ok: false, error: "Valor inválido." };
+  if (!trackedLinksBase()) return { ok: false, error: "A contagem de cliques ainda não está disponível neste servidor." };
+  const subscription = await getCurrentSubscription(user.tenantId);
+  if (!subscription || !planAllowsSending(subscription.plan)) return { ok: false, error: NO_SENDING_MESSAGE };
+  await forTenant(user.tenantId).autopilotSettings.upsert({
+    where: { tenantId: user.tenantId },
+    create: { tenantId: user.tenantId, trackClicks: value.data },
+    update: { trackClicks: value.data },
+  });
+  revalidatePath("/painel/configuracoes");
+  revalidatePath("/painel/relatorios");
+  return {
+    ok: true,
+    message: value.data
+      ? "Ligado: as próximas mensagens enviadas aos grupos levam o link curto que conta cliques."
+      : "Desligado: as próximas mensagens levam o link curto da própria loja.",
+  };
 }

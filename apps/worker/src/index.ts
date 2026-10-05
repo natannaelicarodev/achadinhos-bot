@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { hostname } from "node:os";
-import { getPrisma, recomputeHeadlineKeys } from "@achadinhos/db";
+import { getPrisma, recomputeHeadlineKeys, syncAdminAccounts } from "@achadinhos/db";
 import { classifyForCatalog } from "@achadinhos/stores";
 import { pino } from "pino";
 import { AmazonMiner } from "./catalog/amazon";
@@ -41,6 +41,11 @@ const queueWorker = startWhatsappQueueWorker(createRedis(env.REDIS_URL), {
   logger,
 });
 
+// Contas administradoras (SYSTEM_ADMIN_EMAILS): plano interno "Administrador", sem limites de plano.
+void syncAdminAccounts(prisma)
+  .then((r) => r.granted.length > 0 && logger.info(r, "[admin] plano Administrador aplicado"))
+  .catch((err: unknown) => logger.error({ err }, "[admin] falha ao aplicar o plano Administrador"));
+
 // Headlines: confere o tipo (e a categoria pelo tipo) de todo o catálogo com o dicionário atual.
 // Só grava o que mudou; assim uma mudança no dicionário vale no próximo deploy.
 void recomputeHeadlineKeys(prisma, (p) => classifyForCatalog(p))
@@ -74,9 +79,10 @@ const autopilot = await startAutopilot(createRedis(env.REDIS_URL), {
     AUTOPILOT_MAX_PRICE_AGE_HOURS: String(env.AUTOPILOT_MAX_PRICE_AGE_HOURS),
   },
   fast,
-  // Link rastreável /o/ só se ligado; padrão: link curto da própria loja na mensagem.
-  ...(env.TRACKED_LINKS_ENABLED === "true"
-    ? { shortLinkBase: (env.SHORT_LINK_BASE_URL ?? env.APP_URL ?? "http://localhost:3000").replace(/\/+$/, "") }
+  // Encurtador /o/ disponível só com TRACKED_LINKS_ENABLED e o domínio de links curtos
+  // (SHORT_LINK_BASE_URL, nunca o do painel); cada cliente liga "Contar cliques por grupo".
+  ...(env.TRACKED_LINKS_ENABLED === "true" && env.SHORT_LINK_BASE_URL
+    ? { shortLinkBase: env.SHORT_LINK_BASE_URL.replace(/\/+$/, "") }
     : {}),
 });
 
