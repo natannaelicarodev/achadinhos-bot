@@ -25,6 +25,7 @@ import {
   startOfLocalDay,
   windowEndToday,
   type AutopilotSettings,
+  type CatalogCategory,
   type Prisma,
   type PrismaClient,
   type Store,
@@ -35,6 +36,8 @@ import {
   composeMessage,
   generateAffiliateLink,
   getMessageSettings,
+  chooseHeadline,
+  recentGroupHeadlines,
   MissingCredentialError,
   type ProductRef,
 } from "@achadinhos/stores";
@@ -175,6 +178,7 @@ export async function queueManualOffers(deps: AutopilotDeps, now: Date): Promise
             store: offer.store,
             productExternalId: offer.externalId,
             messageText: offer.messageText,
+            headline: offer.headline,
             affiliateUrl: offer.affiliateUrl,
             priceCents: offer.priceCents,
             imageUrl: offer.imageUrl,
@@ -226,6 +230,8 @@ export interface Candidate {
     originalPriceCents: number | null;
     discountPct: number | null;
     commissionCents: number | null;
+    category?: CatalogCategory | null;
+    headlineKey?: string | null;
   };
   groupIds: string[];
 }
@@ -336,11 +342,17 @@ export async function pickForTenant(deps: AutopilotDeps, tenantId: string, now: 
     throw error;
   }
   const message = await getMessageSettings(tenantId, { client: deps.prisma });
+  // Headline pelo tipo do produto, sem repetir as 10 últimas de nenhum dos grupos de destino.
+  const headline = chooseHeadline(
+    message,
+    { title: p.title, category: p.category, discountPct: p.discountPct, headlineKey: p.headlineKey },
+    { recentByGroup: await recentGroupHeadlines(tenantId, candidate.groupIds, { client: deps.prisma }), random: deps.random },
+  );
   const text = composeMessage(
     message,
     { title: p.title, priceCents: p.priceCents, originalPriceCents: p.originalPriceCents, discountPct: p.discountPct },
     link,
-    message.headline,
+    headline,
   );
   const maxDelay = deps.fast ? FAST_MODE.autoPostMaxDelayMs : AUTO_POST_MAX_DELAY_MS;
   const expiresAt = new Date(Math.min(now.getTime() + maxDelay, windowEndToday(settings, now).getTime()));
@@ -360,6 +372,7 @@ export async function pickForTenant(deps: AutopilotDeps, tenantId: string, now: 
       originalPriceCents: p.originalPriceCents,
       commissionCents: p.commissionCents,
       messageText: text,
+      headline,
       status: "ACTIVE",
     },
     update: {
@@ -370,6 +383,7 @@ export async function pickForTenant(deps: AutopilotDeps, tenantId: string, now: 
       originalPriceCents: p.originalPriceCents,
       commissionCents: p.commissionCents,
       messageText: text,
+      headline,
       status: "ACTIVE",
     },
   });
@@ -389,6 +403,7 @@ export async function pickForTenant(deps: AutopilotDeps, tenantId: string, now: 
           store: p.store,
           productExternalId: p.externalId,
           messageText: text,
+          headline,
           affiliateUrl: link,
           priceCents: p.priceCents,
           imageUrl: p.imageUrl,

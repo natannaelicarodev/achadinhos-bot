@@ -5,14 +5,24 @@ import { DEFAULT_HEADLINE, DEFAULT_MESSAGE_TEMPLATE, messageVariables, renderMes
 export interface MessageSettings {
   body: string;
   headline: string;
+  /** Headline automática pelo tipo do produto (dicionário). */
+  autoHeadlines: boolean;
+  /** Headlines próprias do cliente. */
+  customHeadlines: string[];
   isDefault: boolean;
 }
 
 export async function getMessageSettings(tenantId: string, options: { client?: PrismaClient } = {}): Promise<MessageSettings> {
   const row = await forTenant(tenantId, options.client).messageTemplate.findUnique({ where: { tenantId } });
   return row
-    ? { body: row.body, headline: row.headline, isDefault: false }
-    : { body: DEFAULT_MESSAGE_TEMPLATE, headline: DEFAULT_HEADLINE, isDefault: true };
+    ? {
+        body: row.body,
+        headline: row.headline,
+        autoHeadlines: row.autoHeadlines,
+        customHeadlines: row.customHeadlines,
+        isDefault: false,
+      }
+    : { body: DEFAULT_MESSAGE_TEMPLATE, headline: DEFAULT_HEADLINE, autoHeadlines: true, customHeadlines: [], isDefault: true };
 }
 
 export interface ShareProduct {

@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   computeCatalogScore,
+  headlineCoverage,
+  recomputeHeadlineKeys,
   deactivateCatalogProducts,
   findStaleCatalogProducts,
   listCatalog,
@@ -282,5 +284,59 @@ describe("catálogo no painel", () => {
     );
     expect((await listCatalog(t.id, filters({ search: "fone" }), opts)).items[0]?.hasOffer).toBe(true);
     expect((await listCatalog(other.id, filters({ search: "fone" }), opts)).items[0]?.hasOffer).toBe(false);
+  });
+});
+
+describe("headlines no catálogo", () => {
+  // Classificador falso (o real fica no @achadinhos/stores): "fone" no título = tipo fone.
+  const classify = (p: { title: string; category: string }) => ({
+    headlineKey: /fone/i.test(p.title) ? "type:fone" : /barata/i.test(p.title) ? "type:controle-pragas" : p.category !== "OTHER" ? `category:${p.category}` : "generic",
+    category: /fone/i.test(p.title) ? ("ELECTRONICS" as const) : /barata/i.test(p.title) ? ("HOME_KITCHEN_DECOR" as const) : null,
+  });
+
+  it("categoria do tipo corrige a da loja na mineração (Pets -> Casa), mesmo já gravada", async () => {
+    await saveMinedProducts(db.prisma, [mined("hl-praga", { title: "Armadilha Barata", category: "PETS" })]);
+    await saveMinedProducts(db.prisma, [
+      mined("hl-praga", { title: "Armadilha Barata", category: "HOME_KITCHEN_DECOR", headlineKey: "type:controle-pragas", categoryFromType: true }),
+    ]);
+    const row = await db.prisma.catalogProduct.findUniqueOrThrow({ where: { store_externalId: { store: "SHOPEE", externalId: "hl-praga" } } });
+    expect(row.category).toBe("HOME_KITCHEN_DECOR");
+    // Sem a marca do tipo, a primeira categoria continua valendo.
+    await saveMinedProducts(db.prisma, [mined("hl-praga", { title: "Armadilha Barata", category: "PETS" })]);
+    expect((await db.prisma.catalogProduct.findUniqueOrThrow({ where: { id: row.id } })).category).toBe("HOME_KITCHEN_DECOR");
+  });
+
+  it("recalcular corrige a categoria pelo tipo", async () => {
+    await saveMinedProducts(db.prisma, [mined("hl-praga2", { title: "Isca mata barata", category: "PETS" })]);
+    await recomputeHeadlineKeys(db.prisma, classify, { onlyMissing: true });
+    const row = await db.prisma.catalogProduct.findUniqueOrThrow({ where: { store_externalId: { store: "SHOPEE", externalId: "hl-praga2" } } });
+    expect(row).toMatchObject({ headlineKey: "type:controle-pragas", category: "HOME_KITCHEN_DECOR" });
+  });
+
+  it("grava a chave calculada na mineração e não apaga a existente quando vem sem", async () => {
+    await saveMinedProducts(db.prisma, [mined("hl-1", { title: "Fone Bluetooth", headlineKey: "type:fone" })]);
+    await saveMinedProducts(db.prisma, [mined("hl-1", { title: "Fone Bluetooth" })]);
+    const row = await db.prisma.catalogProduct.findUniqueOrThrow({ where: { store_externalId: { store: "SHOPEE", externalId: "hl-1" } } });
+    expect(row.headlineKey).toBe("type:fone");
+  });
+
+  it("recalcula (só os sem chave ou todos) e o relatório conta genéricos com os títulos", async () => {
+    await db.prisma.catalogProduct.updateMany({ data: { active: false } });
+    await saveMinedProducts(db.prisma, [
+      mined("hl-2", { title: "Fone Gamer" }),
+      mined("hl-3", { title: "Coisa sem tipo", category: "PETS" }),
+      mined("hl-4", { title: "Outra coisa", category: "OTHER" }),
+      mined("hl-5", { title: "Fone antigo", headlineKey: "generic" }),
+    ]);
+    const missing = await recomputeHeadlineKeys(db.prisma, classify, { onlyMissing: true, batch: 2 });
+    expect(missing.updated).toBeGreaterThanOrEqual(3);
+    let c = await headlineCoverage(db.prisma);
+    expect(c).toMatchObject({ active: 4, byType: 1, byCategory: 1, generic: 2, missing: 0 });
+
+    await recomputeHeadlineKeys(db.prisma, classify); // todos: hl-5 vira fone
+    c = await headlineCoverage(db.prisma);
+    expect(c).toMatchObject({ byType: 2, byCategory: 1, generic: 1 });
+    expect(c.genericProducts.map((p) => p.title)).toEqual(["Outra coisa"]);
+    expect(c.categoryProducts.map((p) => p.title)).toEqual(["Coisa sem tipo"]);
   });
 });

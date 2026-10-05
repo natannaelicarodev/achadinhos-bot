@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { hostname } from "node:os";
-import { getPrisma } from "@achadinhos/db";
+import { getPrisma, recomputeHeadlineKeys } from "@achadinhos/db";
+import { classifyForCatalog } from "@achadinhos/stores";
 import { pino } from "pino";
 import { AmazonMiner } from "./catalog/amazon";
 import { ShopeeMiner } from "./catalog/shopee";
@@ -39,6 +40,12 @@ const queueWorker = startWhatsappQueueWorker(createRedis(env.REDIS_URL), {
   history: redisTestSendHistory(redis),
   logger,
 });
+
+// Headlines: confere o tipo (e a categoria pelo tipo) de todo o catálogo com o dicionário atual.
+// Só grava o que mudou; assim uma mudança no dicionário vale no próximo deploy.
+void recomputeHeadlineKeys(prisma, (p) => classifyForCatalog(p))
+  .then((r) => r.updated > 0 && logger.info(r, "[catálogo] headlines calculadas"))
+  .catch((err: unknown) => logger.error({ err }, "[catálogo] falha ao calcular headlines"));
 
 // Catálogo central: credenciais do SISTEMA, só para minerar.
 const catalog = await startCatalogMining(createRedis(env.REDIS_URL), {
