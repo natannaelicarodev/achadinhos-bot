@@ -1,6 +1,6 @@
 import { getStoreCredentialSecrets } from "@achadinhos/db";
 import { EXTENSION_VERSION } from "@achadinhos/extension/protocol";
-import { mercadoLivreSecretsSchema } from "@achadinhos/stores";
+import { amazonSecretsSchema, mercadoLivreSecretsSchema } from "@achadinhos/stores";
 import { DownloadIcon } from "lucide-react";
 import type { Metadata } from "next";
 import { ExtensionDiagnostic, ExtensionStatusBadge } from "@/components/extensao/extension-status";
@@ -15,13 +15,18 @@ export const metadata: Metadata = { title: "Extensão — Achadinhos Bot" };
 
 export default async function ExtensaoPage() {
   const { user } = await requireSession();
-  const ml = mercadoLivreSecretsSchema.safeParse(await getStoreCredentialSecrets(user.tenantId, "MERCADO_LIVRE"));
+  const [mlSecrets, amazonSecrets] = await Promise.all([
+    getStoreCredentialSecrets(user.tenantId, "MERCADO_LIVRE"),
+    getStoreCredentialSecrets(user.tenantId, "AMAZON"),
+  ]);
+  const ml = mercadoLivreSecretsSchema.safeParse(mlSecrets);
+  const amazon = amazonSecretsSchema.safeParse(amazonSecrets);
 
   return (
     <>
       <PageHeader
         title="Extensão do Chrome"
-        description="Com a extensão, o link meli.la do Mercado Livre e o preço real do produto são gerados automaticamente, usando a sua sessão do Mercado Livre no navegador."
+        description="Com a extensão, os links curtos do Mercado Livre (meli.la) e da Amazon e o preço real do produto são gerados automaticamente, usando a sua sessão das lojas no navegador."
       />
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
@@ -61,8 +66,8 @@ export default async function ExtensaoPage() {
               por fora da Chrome Web Store.
             </p>
             <p className="text-xs text-muted-foreground">
-              A extensão só acessa o Mercado Livre e este painel. Sua senha e sua sessão do Mercado Livre nunca saem do seu
-              navegador: o painel recebe apenas o link, o título, o preço e a imagem do produto.
+              A extensão só acessa o Mercado Livre, a Amazon e este painel. Sua senha e sua sessão das lojas nunca saem do
+              seu navegador: o painel recebe apenas o link, o título, o preço e a imagem do produto.
             </p>
           </CardContent>
         </Card>
@@ -70,22 +75,23 @@ export default async function ExtensaoPage() {
           <CardHeader>
             <CardTitle>Testar</CardTitle>
             <CardDescription>
-              Com a extensão instalada e você logada no Mercado Livre neste Chrome, faça um teste com um produto.
+              Com a extensão instalada e você logada na loja neste Chrome, faça um teste com um produto.
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            <ExtensionDiagnostic mlTag={ml.success ? ml.data.mattWord : null} />
+          <CardContent className="grid gap-6">
+            <ExtensionDiagnostic store="ml" tag={ml.success ? ml.data.mattWord : null} />
+            <ExtensionDiagnostic store="amz" tag={amazon.success ? amazon.data.tag : null} />
           </CardContent>
         </Card>
         {isSystemAdmin(user.email) ? (
           <Card className="lg:col-span-2">
             <CardHeader>
-              <CardTitle>Vitrine do Mercado Livre no catálogo (administrador)</CardTitle>
+              <CardTitle>Vitrine do Mercado Livre e da Amazon no catálogo (administrador)</CardTitle>
               <CardDescription>
-                Com a vitrine ativada, a extensão DESTE Chrome busca os mais vendidos do portal de afiliados de hora em hora
-                (enquanto o Chrome estiver aberto e logado no Mercado Livre) e coloca no catálogo de todos os clientes. Só os
-                dados dos produtos são enviados; os links continuam sendo de cada cliente. Produto que não volta na vitrine
-                em 48 horas sai do catálogo.
+                Com a vitrine ativada, a extensão DESTE Chrome busca de hora em hora (enquanto o Chrome estiver aberto) os
+                mais vendidos do portal de afiliados do Mercado Livre (precisa estar logada no ML) e os &quot;Mais vendidos&quot;
+                da Amazon, e coloca no catálogo de todos os clientes. Só os dados dos produtos são enviados; os links
+                continuam sendo de cada cliente. Produto que não volta na vitrine em 48 horas sai do catálogo.
               </CardDescription>
             </CardHeader>
             <CardContent>

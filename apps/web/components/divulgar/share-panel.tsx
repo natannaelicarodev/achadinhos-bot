@@ -35,15 +35,22 @@ export function SharePanel({ preview, editableInfo }: { preview: SharePreview; e
   const [notice, setNotice] = useState<Notice>(
     preview.notice ? { text: preview.notice, tone: preview.shortLink ? "ok" : "warn" } : null,
   );
-  // Mercado Livre sem meli.la ainda: o link longo NÃO aparece enquanto a extensão gera o curto
-  // (só fica como plano B se a extensão faltar ou falhar).
-  const [extensionBusy, setExtensionBusy] = useState(Boolean(preview.mlTag && !preview.shortLink));
+  // Extensão gera o link curto do cliente (ML: meli.la; Amazon: link.amazon pela SiteStripe)
+  // e lê o preço real no navegador dele. Enquanto gera, o link longo não aparece.
+  const extensionTarget = preview.shortLink
+    ? null
+    : preview.mlTag
+      ? ({ store: "ml", tag: preview.mlTag } as const)
+      : preview.amazonTag
+        ? ({ store: "amz", tag: preview.amazonTag } as const)
+        : null;
+  const [extensionBusy, setExtensionBusy] = useState(extensionTarget !== null);
   const [needsManualInfo, setNeedsManualInfo] = useState(preview.needsManualInfo);
 
-  // Mercado Livre: a extensão gera o meli.la e lê o preço real no navegador do cliente.
   useEffect(() => {
-    const tag = preview.mlTag;
-    if (!tag || preview.shortLink) return;
+    if (!extensionTarget) return;
+    const { store, tag } = extensionTarget;
+    const label = store === "ml" ? "o seu link meli.la" : "o seu link curto da Amazon";
     let cancelled = false;
     void (async () => {
       setExtensionBusy(true);
@@ -53,15 +60,15 @@ export function SharePanel({ preview, editableInfo }: { preview: SharePreview; e
       if (!installed) {
         setExtensionBusy(false);
         setNotice({
-          text: "Instale a extensão para gerar o seu link meli.la e o preço real automaticamente. Enquanto isso, o link abaixo usa a sua etiqueta.",
+          text: `Instale a extensão para gerar ${label} e o preço real automaticamente. Enquanto isso, o link abaixo usa a sua etiqueta.`,
           tone: "warn",
           installLink: true,
         });
         return;
       }
       const productUrl = preview.product.productUrl;
-      // Preço real em paralelo: o meli.la não espera a leitura da página do produto.
-      void callExtension("ml.productInfo", { productUrl }).then((info) => {
+      // Preço real em paralelo: o link curto não espera a leitura da página do produto.
+      void callExtension(store === "ml" ? "ml.productInfo" : "amz.productInfo", { productUrl }).then((info) => {
         if (cancelled || !info.ok) return;
         // Preço real (com a sessão do navegador) vale mais que o do catálogo/página lida no servidor.
         if (info.data.priceCents) setPrice(centsToInput(info.data.priceCents));
@@ -70,14 +77,14 @@ export function SharePanel({ preview, editableInfo }: { preview: SharePreview; e
         if (info.data.imageUrl) setImageUrl((u) => u || info.data.imageUrl || "");
         if (info.data.title && info.data.priceCents) setNeedsManualInfo(false);
       });
-      const created = await callExtension("ml.createLink", { productUrl, tag });
+      const created = await callExtension(store === "ml" ? "ml.createLink" : "amz.createLink", { productUrl, tag });
       if (cancelled) return;
       if (!created.ok) {
         setExtensionBusy(false);
-        setNotice({ text: `Não foi possível gerar o meli.la pela extensão: ${created.error}`, tone: "warn" });
+        setNotice({ text: `Não foi possível gerar ${label} pela extensão: ${created.error}`, tone: "warn" });
         return;
       }
-      const confirmed = await confirmExtensionLinkAction(created.data.shortUrl);
+      const confirmed = await confirmExtensionLinkAction(created.data.shortUrl, productUrl);
       if (cancelled) return;
       setExtensionBusy(false);
       if (!confirmed.ok) {
@@ -87,7 +94,10 @@ export function SharePanel({ preview, editableInfo }: { preview: SharePreview; e
       setLink(confirmed.link);
       setShortLink(confirmed.link);
       setNotice({
-        text: "Link meli.la gerado pela extensão: quem clicar vê a página do Mercado Livre com a sua recomendação.",
+        text:
+          store === "ml"
+            ? "Link meli.la gerado pela extensão: quem clicar vê a página do Mercado Livre com a sua recomendação."
+            : "Link curto da Amazon gerado pela extensão com a sua etiqueta de Associados.",
         tone: "ok",
       });
     })();

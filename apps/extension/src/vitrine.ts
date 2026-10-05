@@ -1,6 +1,7 @@
 // Vitrine compartilhada: a extensão do ADMINISTRADOR busca a vitrine do portal de
 // afiliados (mais vendidos, por categoria) e envia os produtos ao catálogo central.
 // Só dados públicos de produto saem do navegador: nada da sessão do ML.
+import type { AmazonBestseller } from "./amazon";
 import type { HubItem } from "./protocol";
 
 /** Páginas da vitrine por categoria (mais vendidos). */
@@ -8,6 +9,10 @@ export const VITRINE_PAGES_PER_CATEGORY = 10;
 /** Pausa entre pedidos ao ML (não sobrecarregar o portal). */
 export const VITRINE_PAUSE_MS = 1_500;
 export const VITRINE_ENDPOINT_PATH = "/api/catalog/mercado-livre";
+export const AMAZON_VITRINE_ENDPOINT_PATH = "/api/catalog/amazon";
+/** Amazon: páginas de "Mais vendidos" por categoria (30 produtos cada) e pausa maior entre pedidos. */
+export const AMAZON_PAGES_PER_CATEGORY = 2;
+export const AMAZON_PAUSE_MS = 3_000;
 export const VITRINE_INTERVAL_MINUTES = 60;
 /** Categoria com menos que isso nos "mais vendidos" é completada com a vitrine normal (sem esse filtro). */
 export const VITRINE_MIN_PER_CATEGORY = 60;
@@ -82,14 +87,59 @@ export async function collectVitrine(
   return batches;
 }
 
+export interface AmazonVitrineBatch {
+  /** Categoria dos "Mais vendidos" da Amazon (ex.: "grocery"). */
+  slug: string;
+  items: AmazonBestseller[];
+}
+
+/**
+ * Amazon: "Mais vendidos" de cada categoria, até N páginas. Captcha PARA tudo
+ * (não insiste); outra falha numa categoria não derruba as outras.
+ */
+export async function collectAmazonVitrine(
+  read: (slug: string, page: number) => Promise<AmazonBestseller[]>,
+  slugs: string[],
+  options: { pages?: number; pause?: (ms: number) => Promise<void> } = {},
+): Promise<AmazonVitrineBatch[]> {
+  const pages = options.pages ?? AMAZON_PAGES_PER_CATEGORY;
+  const pause = options.pause ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const batches: AmazonVitrineBatch[] = [];
+  let firstError: unknown = null;
+  let first = true;
+  for (const slug of slugs) {
+    const items: AmazonBestseller[] = [];
+    try {
+      for (let page = 1; page <= pages; page++) {
+        if (!first) await pause(AMAZON_PAUSE_MS);
+        first = false;
+        const found = await read(slug, page);
+        if (found.length === 0) break;
+        items.push(...found);
+      }
+    } catch (error) {
+      if (error instanceof Error && /captcha/i.test(error.message)) {
+        if (batches.length === 0 && items.length === 0) throw error;
+        if (items.length > 0) batches.push({ slug, items });
+        return batches; // a Amazon desconfiou: para por aqui
+      }
+      firstError ??= error;
+    }
+    if (items.length > 0) batches.push({ slug, items });
+  }
+  if (batches.length === 0 && firstError) throw firstError;
+  return batches;
+}
+
 /** Envia ao painel. A chave da vitrine autentica o pedido (Bearer). */
 export async function postVitrine(
   http: typeof fetch,
   endpoint: string,
   token: string,
-  batches: VitrineBatch[],
+  batches: VitrineBatch[] | AmazonVitrineBatch[],
+  path: string = VITRINE_ENDPOINT_PATH,
 ): Promise<{ upserted: number }> {
-  const response = await http(new URL(VITRINE_ENDPOINT_PATH, endpoint).toString(), {
+  const response = await http(new URL(path, endpoint).toString(), {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
     body: JSON.stringify({ batches }),

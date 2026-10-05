@@ -49,7 +49,7 @@ const manifest = {
   name: "Achadinhos Bot",
   version: EXTENSION_VERSION,
   description:
-    "Gera seus links de afiliado do Mercado Livre e lê o preço real do produto usando a sua sessão do navegador, para o painel Achadinhos Bot.",
+    "Gera seus links de afiliado do Mercado Livre e da Amazon e lê o preço real do produto usando a sua sessão do navegador, para o painel Achadinhos Bot.",
   background: { service_worker: "background.js", type: "module" },
   content_scripts: [{ matches: [...new Set(origins.map(matchPattern))], js: ["content.js"], run_at: "document_start" }],
   // Painel: só para a vitrine compartilhada enviar os produtos (extensão do administrador).
@@ -57,6 +57,7 @@ const manifest = {
     "https://www.mercadolivre.com.br/*",
     "https://*.mercadolivre.com.br/*",
     "https://meli.la/*",
+    "https://www.amazon.com.br/*",
     ...new Set(origins.map(matchPattern)),
   ],
   // scripting: pedidos de dentro de uma aba do ML. storage + alarms: vitrine de hora em hora.

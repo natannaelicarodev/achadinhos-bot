@@ -2,7 +2,7 @@
 // e leitura de etiquetas a partir de um link de afiliado colado pelo cliente.
 import type { Store } from "@achadinhos/db";
 import { z } from "zod";
-import { parseHttpsUrl, resolveStoreUrl, storeOfHost, StoreUrlError, type FetchOptions } from "./urls";
+import { parseHttpsUrl, parseProductUrl, resolveStoreUrl, storeOfHost, StoreUrlError, type FetchOptions } from "./urls";
 
 /**
  * campaign_id da Shein: 20. Veio de um link REAL gerado na conta de afiliada
@@ -92,6 +92,38 @@ export async function resolveMercadoLivreShortLink(raw: string, options: FetchOp
 /** true se o link é do próprio cliente (mesma Etiqueta e mesmo ID da Ferramenta). */
 export function isOwnMercadoLivreLink(tags: MercadoLivreSecrets | null, secrets: MercadoLivreSecrets | null): boolean {
   return Boolean(tags && secrets && tags.mattTool === secrets.mattTool && tags.mattWord === secrets.mattWord);
+}
+
+/** Link curto da Amazon (SiteStripe: link.amazon; antigos: amzn.to, a.co). */
+export function isAmazonShortLink(url: URL): boolean {
+  return ["link.amazon", "amzn.to", "a.co", "amzlinks.in"].includes(url.hostname.toLowerCase()) && url.pathname.length > 1;
+}
+
+/** Link curto da Amazon sem parâmetros (o que vai na mensagem). */
+export const canonicalAmazonShortLink = (url: URL) => `https://${url.hostname.toLowerCase()}${url.pathname}`;
+
+/**
+ * Segue o link curto da Amazon até a página do produto e devolve a etiqueta (tag)
+ * e o produto. Usado para conferir que o link gerado pela extensão é do cliente.
+ */
+export async function resolveAmazonShortLink(raw: string, options: FetchOptions = {}) {
+  const isProduct = (url: URL) => {
+    const ref = parseProductUrl(url);
+    return ref?.store === "AMAZON" ? ref : null;
+  };
+  const chain = await resolveStoreUrl(raw, { ...options, stopWhen: (url) => isProduct(url) !== null });
+  const landing = chain.at(-1)!;
+  return { tag: landing.searchParams.get("tag")?.toLowerCase() ?? null, product: isProduct(landing) };
+}
+
+/** true se o link curto da Amazon leva à etiqueta do cliente (e, se informado, ao mesmo produto). */
+export function isOwnAmazonLink(
+  resolved: { tag: string | null; product: { externalId: string } | null },
+  secrets: AmazonSecrets | null,
+  expectedAsin?: string,
+): boolean {
+  if (!resolved.tag || !secrets || resolved.tag !== secrets.tag || !resolved.product) return false;
+  return !expectedAsin || resolved.product.externalId === expectedAsin;
 }
 
 const SHEIN_ID = /affiliate_koc_(\d{4,20})/;

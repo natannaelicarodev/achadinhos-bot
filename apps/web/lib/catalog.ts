@@ -50,6 +50,23 @@ export const ML_CATEGORY_IDS: Partial<Record<Exclude<CatalogCategory, "OTHER">, 
 };
 
 /**
+ * Amazon: páginas de "Mais vendidos" (amazon.com.br/gp/bestsellers/{slug}) -> categoria do catálogo.
+ * Conferidas em 10/2026: todas abrem e trazem 30 produtos por página.
+ */
+export const AMAZON_BESTSELLER_CATEGORIES: Record<string, Exclude<CatalogCategory, "OTHER">> = {
+  grocery: "FOOD_BEVERAGES", // Alimentos e Bebidas
+  beauty: "BEAUTY",
+  kitchen: "HOME_KITCHEN_DECOR",
+  home: "HOME_KITCHEN_DECOR",
+  electronics: "ELECTRONICS",
+  "baby-products": "KIDS_BABY",
+  toys: "KIDS_BABY",
+  fashion: "FASHION",
+  "pet-products": "PETS",
+  hpc: "HEALTH", // Saúde e Cuidados Pessoais
+};
+
+/**
  * Buscas por palavra na vitrine do ML (categorias que o portal não tem) -> categoria do catálogo.
  * VAZIO de propósito: testado em 10/2026, o portal quase não tem comida/bebida (a busca por
  * "chocolate", "café", "vinho"... devolve utensílios e roupas; sobraram 4 produtos após o filtro

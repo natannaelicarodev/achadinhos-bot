@@ -6,7 +6,8 @@ import type { Store } from "@achadinhos/db";
 const STORE_DOMAINS: { store: Store; domains: string[] }[] = [
   { store: "SHOPEE", domains: ["shopee.com.br", "shope.ee"] },
   { store: "MERCADO_LIVRE", domains: ["mercadolivre.com.br", "mercadolivre.com", "mercadolibre.com", "meli.la"] },
-  { store: "AMAZON", domains: ["amazon.com.br", "amzn.to", "a.co"] },
+  // link.amazon -> amzlinks.in -> amazon.com.br: link curto atual da SiteStripe (10/2026).
+  { store: "AMAZON", domains: ["amazon.com.br", "amzn.to", "a.co", "link.amazon", "amzlinks.in"] },
   { store: "SHEIN", domains: ["shein.com", "shein.com.br"] },
 ];
 
@@ -70,6 +71,8 @@ function isShortener(url: URL): boolean {
     (host === "mercadolivre.com" && url.pathname.startsWith("/sec/")) ||
     host === "amzn.to" ||
     host === "a.co" ||
+    host === "link.amazon" ||
+    host === "amzlinks.in" ||
     host === "onelink.shein.com" ||
     host === "shope.ee" ||
     host === "s.shopee.com.br"

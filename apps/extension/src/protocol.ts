@@ -22,6 +22,21 @@ const mlProductUrl = z
 
 const mlTag = z.string().regex(/^[A-Za-z0-9_.-]{1,80}$/, "Etiqueta inválida.");
 
+const amazonProductUrl = z
+  .string()
+  .url()
+  .max(2048)
+  .refine((value) => {
+    try {
+      const url = new URL(value);
+      return url.protocol === "https:" && url.hostname === "www.amazon.com.br" && /\/dp\/[A-Z0-9]{10}/i.test(url.pathname);
+    } catch {
+      return false;
+    }
+  }, "Endereço de produto da Amazon inválido.");
+
+const amazonTag = z.string().regex(/^[a-z0-9][a-z0-9-]{0,60}-\d{2}$/, "Etiqueta da Amazon inválida.");
+
 export const requestSchemas = {
   /** Extensão instalada? Devolve a versão. */
   ping: z.object({}),
@@ -31,6 +46,12 @@ export const requestSchemas = {
   "ml.productInfo": z.object({ productUrl: mlProductUrl }),
   /** Diagnóstico da instalação: onde está o token de proteção e se o ML aceita o pedido. */
   "ml.diagnose": z.object({ productUrl: mlProductUrl, tag: mlTag }),
+  /** Amazon: link curto (link.amazon) com a etiqueta do cliente, pela SiteStripe. */
+  "amz.createLink": z.object({ productUrl: amazonProductUrl, tag: amazonTag }),
+  /** Amazon: título, preço, preço "De" e imagem da página do produto. */
+  "amz.productInfo": z.object({ productUrl: amazonProductUrl }),
+  /** Amazon: teste da instalação (SiteStripe e leitura do preço). */
+  "amz.diagnose": z.object({ productUrl: amazonProductUrl, tag: amazonTag }),
   /** Vitrine do portal de afiliados (produtos do ML para o catálogo). */
   "ml.hubSearch": z.object({
     search: z.string().trim().max(100).default(""),
@@ -48,6 +69,8 @@ export const requestSchemas = {
     categories: z.array(z.string().regex(/^MLB\d{1,10}$/, "Categoria inválida.")).max(20).default([]),
     /** Palavras-chave (categorias que o portal não tem, ex.: Alimentos). */
     searches: z.array(z.string().trim().min(2).max(50)).max(30).default([]),
+    /** Amazon: categorias dos "Mais vendidos" (ex.: "grocery"). */
+    amazonCategories: z.array(z.string().regex(/^[a-z][a-z-]{1,40}$/, "Categoria da Amazon inválida.")).max(20).default([]),
   }),
   "vitrine.status": z.object({}),
   "vitrine.runNow": z.object({}),
@@ -83,6 +106,9 @@ export interface ResponseMap {
     originalPriceCents: number | null;
   };
   "ml.diagnose": { steps: { step: string; ok: boolean; detail: string }[] };
+  "amz.createLink": { shortUrl: string };
+  "amz.productInfo": { title: string | null; imageUrl: string | null; priceCents: number | null; originalPriceCents: number | null };
+  "amz.diagnose": { steps: { step: string; ok: boolean; detail: string }[] };
   "ml.hubSearch": { items: HubItem[]; hasMore: boolean };
   "vitrine.configure": VitrineStatus;
   "vitrine.status": VitrineStatus;
