@@ -7,10 +7,11 @@ import { forTenant } from "./tenant";
 export const MIN_CATALOG_RATING = 4.5;
 export const CATALOG_PAGE_SIZE = 24;
 /**
- * Mercado Livre vem da vitrine compartilhada (extensão do administrador), não de um
- * minerador com "reconferir": produto que não volta na vitrine em 48h some do catálogo.
+ * Mercado Livre e Amazon vêm da vitrine compartilhada (extensão do administrador), não
+ * de um minerador com "reconferir": produto que não volta na vitrine em 48h some do catálogo.
  */
 export const MERCADO_LIVRE_STALE_HOURS = 48;
+export const VITRINE_STORES: Store[] = ["MERCADO_LIVRE", "AMAZON"];
 
 /** Produto como vem de um minerador (já convertido para centavos e %). */
 export interface MinedProduct {
@@ -28,6 +29,11 @@ export interface MinedProduct {
   commissionCents: number | null;
   rating: number | null;
   soldCount: number | null;
+  /**
+   * Estimativa de popularidade quando a loja não informa vendidos (Amazon: avaliações).
+   * Só entra no ranking; não é gravada nem mostrada como "vendidos".
+   */
+  popularity?: number | null;
 }
 
 /** Minúsculas, sem acento e com espaços simples: base da busca do catálogo. */
@@ -46,8 +52,10 @@ const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
  * Ranking 0–100: vendas (45%), nota (25%), desconto (15%), comissão % (15%).
  * Vendas em escala log (100 mil vendidos = máximo). Nota desconhecida = neutra.
  */
-export function computeCatalogScore(p: Pick<MinedProduct, "soldCount" | "rating" | "discountPct" | "commissionPct">) {
-  const sales = clamp01(Math.log10((p.soldCount ?? 0) + 1) / 5);
+export function computeCatalogScore(
+  p: Pick<MinedProduct, "soldCount" | "rating" | "discountPct" | "commissionPct"> & { popularity?: number | null },
+) {
+  const sales = clamp01(Math.log10((p.soldCount ?? p.popularity ?? 0) + 1) / 5);
   const rating = p.rating === null ? 0.5 : clamp01((p.rating - MIN_CATALOG_RATING) / (5 - MIN_CATALOG_RATING));
   const discount = clamp01((p.discountPct ?? 0) / 70);
   const commission = clamp01((p.commissionPct ?? 0) / 20);
@@ -211,7 +219,7 @@ export async function listCatalog(
     ...(filters.category ? { category: filters.category } : {}),
     ...(filters.store ? { store: filters.store } : {}),
     ...(terms.length ? { AND: terms.map((term) => ({ searchText: { contains: term } })) } : {}),
-    NOT: { store: "MERCADO_LIVRE", lastSeenAt: { lt: mlCutoff } },
+    NOT: { store: { in: VITRINE_STORES }, lastSeenAt: { lt: mlCutoff } },
   };
   if (filters.favoritesOnly) {
     const favorites = await db.favorite.findMany({ select: { catalogProductId: true } });

@@ -1,9 +1,16 @@
 // Service worker da extensão: recebe pedidos SÓ do content script do painel
 // (origens permitidas no build) e fala com o Mercado Livre usando a sessão do navegador.
 import { handleRequest } from "./handlers";
-import { fetchFromMlTab, holdMlTab } from "./ml-tab";
+import { readBestsellers } from "./amazon";
+import { AMAZON_SITE, fetchFromAmazonTab, fetchFromMlTab, holdMlTab, holdStoreTab } from "./store-tab";
 import { parseRequest, requestSchemas, type HubItem, type RequestPayload, type RequestType, type VitrineStatus } from "./protocol";
-import { collectVitrine, postVitrine, VITRINE_INTERVAL_MINUTES } from "./vitrine";
+import {
+  AMAZON_VITRINE_ENDPOINT_PATH,
+  collectAmazonVitrine,
+  collectVitrine,
+  postVitrine,
+  VITRINE_INTERVAL_MINUTES,
+} from "./vitrine";
 
 declare const __PANEL_ORIGINS__: string[];
 const allowedOrigins = new Set(__PANEL_ORIGINS__);
@@ -16,6 +23,7 @@ interface VitrineConfig {
   endpoint: string;
   categories: string[];
   searches?: string[];
+  amazonCategories?: string[];
 }
 interface VitrineState {
   lastRunAt: string | null;
@@ -36,26 +44,49 @@ async function vitrineStatus(): Promise<VitrineStatus> {
   return { enabled: Boolean(config), endpoint: config?.endpoint ?? null, running, ...state };
 }
 
+const failure = (error: unknown) => (error instanceof Error ? error.message : "falha ao atualizar.");
+
 async function runVitrine(): Promise<void> {
   const { config } = await loadVitrine();
   if (!config || running) return;
   running = true;
-  let result: VitrineState["lastResult"];
+  // Mercado Livre e Amazon independentes: falha numa loja não impede a outra.
+  const parts: { ok: boolean; text: string }[] = [];
   try {
-    const batches = await holdMlTab(() =>
-      collectVitrine(async ({ category, search, offset, bestSeller }) => {
-        const found = await handleRequest("ml.hubSearch", { search, category, bestSeller, offset }, { fetch: fetchFromMlTab });
-        if (!found.ok) throw new Error(found.error);
-        return (found.data as { items: HubItem[] }).items;
-      }, config.categories, { searches: config.searches ?? [] }),
-    );
-    const { upserted } = await postVitrine(fetch, config.endpoint, config.token, batches);
-    result = { ok: true, message: `${upserted} produto(s) enviados ao catálogo.` };
-  } catch (error) {
-    result = { ok: false, message: error instanceof Error ? error.message : "Falha ao atualizar a vitrine." };
+    if (config.categories.length > 0 || (config.searches ?? []).length > 0) {
+      try {
+        const batches = await holdMlTab(() =>
+          collectVitrine(async ({ category, search, offset, bestSeller }) => {
+            const found = await handleRequest("ml.hubSearch", { search, category, bestSeller, offset }, { fetch: fetchFromMlTab });
+            if (!found.ok) throw new Error(found.error);
+            return (found.data as { items: HubItem[] }).items;
+          }, config.categories, { searches: config.searches ?? [] }),
+        );
+        const { upserted } = await postVitrine(fetch, config.endpoint, config.token, batches);
+        parts.push({ ok: true, text: `Mercado Livre: ${upserted} produto(s)` });
+      } catch (error) {
+        parts.push({ ok: false, text: `Mercado Livre: ${failure(error)}` });
+      }
+    }
+    const slugs = config.amazonCategories ?? [];
+    if (slugs.length > 0) {
+      try {
+        const batches = await holdStoreTab(AMAZON_SITE, () =>
+          collectAmazonVitrine((slug, page) => readBestsellers(fetchFromAmazonTab, slug, page), slugs),
+        );
+        const { upserted } = await postVitrine(fetch, config.endpoint, config.token, batches, AMAZON_VITRINE_ENDPOINT_PATH);
+        parts.push({ ok: true, text: `Amazon: ${upserted} produto(s)` });
+      } catch (error) {
+        parts.push({ ok: false, text: `Amazon: ${failure(error)}` });
+      }
+    }
   } finally {
     running = false;
   }
+  const result: VitrineState["lastResult"] = {
+    ok: parts.length > 0 && parts.every((p) => p.ok),
+    message: parts.length > 0 ? `${parts.map((p) => p.text).join(" · ")}.` : "Nada configurado para atualizar.",
+  };
   await chrome.storage.local.set({ vitrineState: { lastRunAt: new Date().toISOString(), lastResult: result } });
 }
 
@@ -70,6 +101,7 @@ async function configureVitrine(origin: string, payload: RequestPayload<"vitrine
     endpoint: origin,
     categories: payload.categories,
     searches: payload.searches,
+    amazonCategories: payload.amazonCategories,
   };
   await chrome.storage.local.set({ vitrineConfig: config });
   await chrome.alarms.create(ALARM, { periodInMinutes: VITRINE_INTERVAL_MINUTES, delayInMinutes: VITRINE_INTERVAL_MINUTES });
@@ -113,6 +145,6 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
   }
 
   // Pedidos ao ML saem de dentro de uma aba do ML (origem e sessão reconhecidas pelo site).
-  void handleRequest(type as RequestType, payload, { fetch: fetchFromMlTab }).then(sendResponse);
+  void handleRequest(type as RequestType, payload, { fetch: fetchFromMlTab, amazonFetch: fetchFromAmazonTab }).then(sendResponse);
   return true; // resposta assíncrona
 });

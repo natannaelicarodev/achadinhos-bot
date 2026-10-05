@@ -2,6 +2,10 @@
 
 import { forTenant, getStoreCredentialSecrets, saveOfferForSending } from "@achadinhos/db";
 import {
+  amazonSecretsSchema,
+  canonicalAmazonShortLink,
+  isAmazonShortLink,
+  isOwnAmazonLink,
   isMercadoLivreShortLink,
   isMercadoLivreSocialPage,
   isOwnMercadoLivreLink,
@@ -9,10 +13,12 @@ import {
   parseHttpsUrl,
   parseProductUrl,
   readMercadoLivreSocialPage,
+  resolveAmazonShortLink,
   resolveMercadoLivreShortLink,
   resolveStoreUrl,
   StoreUrlError,
   type AffiliateStore,
+  type AmazonSecrets,
   type MercadoLivreSecrets,
   type PageProductInfo,
   type ProductRef,
@@ -47,6 +53,8 @@ export interface SharePreview {
    * (null se não for ML, se já for o meli.la do cliente ou se faltar a credencial).
    */
   mlTag: string | null;
+  /** Amazon: etiqueta do cliente para a EXTENSÃO gerar o link curto (link.amazon) pela SiteStripe. */
+  amazonTag: string | null;
   settings: MessageSettings;
 }
 
@@ -55,6 +63,20 @@ export type PreviewResult = { ok: true; preview: SharePreview } | { ok: false; e
 const ML_PREFER_SHORT_LINK =
   "Instale a extensão (menu Extensão) para gerar o seu link meli.la automaticamente, ou cole aqui o link meli.la gerado no portal de afiliados do Mercado Livre.";
 const ML_OWN_SHORT_LINK = "Usando o seu link meli.la: quem clicar vê a página do Mercado Livre com a sua recomendação.";
+
+const AMAZON_PREFER_SHORT_LINK =
+  "Instale a extensão (menu Extensão) e entre na sua conta de Associados da Amazon neste Chrome para gerar o link curto automaticamente.";
+
+async function tenantAmazonTag(tenantId: string): Promise<AmazonSecrets | null> {
+  const parsed = amazonSecretsSchema.safeParse(await getStoreCredentialSecrets(tenantId, "AMAZON"));
+  return parsed.success ? parsed.data : null;
+}
+
+/** Link curto da Amazon gerado pela extensão: confere etiqueta (e produto) do cliente. */
+async function verifyAmazonShortLink(tenantId: string, url: URL, expectedAsin?: string): Promise<string | null> {
+  const resolved = await resolveAmazonShortLink(url.toString());
+  return isOwnAmazonLink(resolved, await tenantAmazonTag(tenantId), expectedAsin) ? canonicalAmazonShortLink(url) : null;
+}
 
 async function tenantMercadoLivreTags(tenantId: string): Promise<MercadoLivreSecrets | null> {
   const parsed = mercadoLivreSecretsSchema.safeParse(await getStoreCredentialSecrets(tenantId, "MERCADO_LIVRE"));
@@ -75,7 +97,7 @@ function shortLinkProductRef(shortLink: URL, landing: URL): ProductRef {
 
 function buildPreview(
   base: Pick<SharePreview, "product" | "catalogProductId" | "settings"> &
-    Partial<Pick<SharePreview, "shortLink" | "notice" | "mlTag">>,
+    Partial<Pick<SharePreview, "shortLink" | "notice" | "mlTag" | "amazonTag">>,
   info: (PageProductInfo & { discountPct?: number | null }) | null,
   link: LinkResult,
   needsManualInfo: boolean,
@@ -85,6 +107,7 @@ function buildPreview(
     shortLink: base.shortLink ?? null,
     notice: base.notice ?? null,
     mlTag: base.mlTag ?? null,
+    amazonTag: base.amazonTag ?? null,
     info: {
       title: info?.title ?? null,
       imageUrl: info?.imageUrl ?? null,
@@ -168,11 +191,13 @@ export async function previewPastedLinkAction(rawUrl: string): Promise<PreviewRe
   }
 
   const isMl = product.store === "MERCADO_LIVRE";
-  const [link, info, settings, mlTags] = await Promise.all([
+  const isAmazon = product.store === "AMAZON";
+  const [link, info, settings, mlTags, amazon] = await Promise.all([
     affiliateLinkFor(user.tenantId, product),
     readProductInfo(product),
     getMessageSettings(user.tenantId),
     isMl ? tenantMercadoLivreTags(user.tenantId) : Promise.resolve(null),
+    isAmazon ? tenantAmazonTag(user.tenantId) : Promise.resolve(null),
   ]);
   return {
     ok: true,
@@ -181,8 +206,9 @@ export async function previewPastedLinkAction(rawUrl: string): Promise<PreviewRe
         product,
         catalogProductId: null,
         settings,
-        notice: isMl ? ML_PREFER_SHORT_LINK : null,
+        notice: isMl ? ML_PREFER_SHORT_LINK : isAmazon && amazon ? AMAZON_PREFER_SHORT_LINK : null,
         mlTag: mlTags?.mattWord ?? null,
+        amazonTag: amazon?.tag ?? null,
       },
       info,
       link,
@@ -201,10 +227,12 @@ export async function previewCatalogProductAction(catalogProductId: string): Pro
 
   const product: ProductRef = { store: row.store, externalId: row.externalId, productUrl: row.productUrl };
   const isMl = row.store === "MERCADO_LIVRE";
-  const [link, settings, mlTags] = await Promise.all([
+  const isAmazon = row.store === "AMAZON";
+  const [link, settings, mlTags, amazon] = await Promise.all([
     affiliateLinkFor(user.tenantId, product),
     getMessageSettings(user.tenantId),
     isMl ? tenantMercadoLivreTags(user.tenantId) : Promise.resolve(null),
+    isAmazon ? tenantAmazonTag(user.tenantId) : Promise.resolve(null),
   ]);
   return {
     ok: true,
@@ -214,6 +242,7 @@ export async function previewCatalogProductAction(catalogProductId: string): Pro
         catalogProductId: row.id,
         settings,
         ...(isMl ? { notice: ML_PREFER_SHORT_LINK, mlTag: mlTags?.mattWord ?? null } : {}),
+        ...(isAmazon && amazon ? { notice: AMAZON_PREFER_SHORT_LINK, amazonTag: amazon.tag } : {}),
       },
       {
         title: row.title,
@@ -232,9 +261,29 @@ export async function previewCatalogProductAction(catalogProductId: string): Pro
  * meli.la gerado pela EXTENSÃO no navegador: o servidor confere que é do
  * cliente (Etiqueta e ID da Ferramenta batem) antes de o painel usar.
  */
-export async function confirmExtensionLinkAction(shortLink: string): Promise<{ ok: true; link: string } | { ok: false; error: string }> {
+export async function confirmExtensionLinkAction(
+  shortLink: string,
+  productUrl?: string,
+): Promise<{ ok: true; link: string } | { ok: false; error: string }> {
   const { user } = await requireSession();
   const url = parseHttpsUrl(z.string().max(300).catch("").parse(shortLink));
+  if (url && isAmazonShortLink(url)) {
+    const product = productUrl ? parseHttpsUrl(productUrl) : null;
+    const expected = product ? parseProductUrl(product) : null;
+    try {
+      const link = await verifyAmazonShortLink(user.tenantId, url, expected?.store === "AMAZON" ? expected.externalId : undefined);
+      return link
+        ? { ok: true, link }
+        : {
+            ok: false,
+            error:
+              "O link curto gerado não é da etiqueta configurada em Credenciais. Confira se a conta de Associados logada neste Chrome é a mesma.",
+          };
+    } catch (error) {
+      if (error instanceof StoreUrlError) return { ok: false, error: error.message };
+      throw error;
+    }
+  }
   if (!url || !isMercadoLivreShortLink(url)) return { ok: false, error: "A extensão devolveu um link inválido." };
   try {
     const { tags } = await resolveMercadoLivreShortLink(url.toString());
@@ -279,7 +328,24 @@ export async function sendToGroupsAction(input: z.input<typeof sendSchema>): Pro
   let product: ProductRef | null;
   let affiliateUrl: string;
   const short = data.shortLink ? parseHttpsUrl(data.shortLink) : null;
-  if (short) {
+  if (short && isAmazonShortLink(short)) {
+    // Link curto da Amazon do cliente: confere de novo etiqueta e produto.
+    const url = parseHttpsUrl(data.productUrl);
+    product = url ? parseProductUrl(url) : null;
+    if (!product || product.store !== "AMAZON") return { ok: false, error: "Produto inválido." };
+    if (data.catalogProductId) {
+      const row = await forTenant(user.tenantId).catalogProduct.findUnique({ where: { id: data.catalogProductId } });
+      if (!row || row.productUrl !== product.productUrl) return { ok: false, error: "Produto do catálogo não encontrado." };
+    }
+    try {
+      const link = await verifyAmazonShortLink(user.tenantId, short, product.externalId);
+      if (!link) return { ok: false, error: "Este link curto da Amazon não é da sua etiqueta de Associados." };
+      affiliateUrl = link;
+    } catch (error) {
+      if (error instanceof StoreUrlError) return { ok: false, error: error.message };
+      throw error;
+    }
+  } else if (short) {
     // meli.la do cliente: confere de novo que é dele antes de usar como está.
     if (!isMercadoLivreShortLink(short)) return { ok: false, error: "Link inválido." };
     try {
@@ -316,7 +382,8 @@ export async function sendToGroupsAction(input: z.input<typeof sendSchema>): Pro
     data.headline || settings.headline,
   );
   await saveOfferForSending(user.tenantId, {
-    catalogProductId: short ? null : data.catalogProductId,
+    // meli.la colado pode ser de produto fora do catálogo; link curto da Amazon é do produto conferido.
+    catalogProductId: short && !isAmazonShortLink(short) ? null : data.catalogProductId,
     store: product.store,
     externalId: product.externalId,
     title: data.title,

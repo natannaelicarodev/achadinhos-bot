@@ -2,6 +2,7 @@
 import { EXTENSION_VERSION, parseRequest, type ExtensionResult, type RequestPayload, type RequestType, type ResponseMap } from "./protocol";
 import { createMeliLink, fetchCsrfToken, MlError, readMlProductInfo } from "./ml";
 import { searchHub } from "./ml-hub";
+import { AmazonError, createAmazonShortLink, readAmazonProductInfo } from "./amazon";
 
 type Fetch = typeof fetch;
 
@@ -21,11 +22,15 @@ async function csrfToken(http: Fetch, now: number, force = false): Promise<strin
 }
 
 const message = (error: unknown) =>
-  error instanceof MlError ? error.message : "Não foi possível falar com o Mercado Livre agora. Tente de novo.";
+  error instanceof MlError || error instanceof AmazonError
+    ? error.message
+    : "Não foi possível falar com a loja agora. Tente de novo.";
 
 /** No diagnóstico, mostra também o código HTTP e o erro técnico (sem dados da sessão). */
 const detail = (error: unknown) => {
-  if (error instanceof MlError) return error.status ? `${error.message} (HTTP ${error.status})` : error.message;
+  if (error instanceof MlError || error instanceof AmazonError) {
+    return error.status ? `${error.message} (HTTP ${error.status})` : error.message;
+  }
   return `${message(error)} [${error instanceof Error ? error.message.slice(0, 120) : "erro"}]`;
 };
 
@@ -60,10 +65,32 @@ async function diagnose(http: Fetch, payload: RequestPayload<"ml.diagnose">): Pr
   return { steps };
 }
 
+async function diagnoseAmazon(http: Fetch, payload: RequestPayload<"amz.diagnose">): Promise<ResponseMap["amz.diagnose"]> {
+  const steps: ResponseMap["amz.diagnose"]["steps"] = [];
+  try {
+    const { shortUrl } = await createAmazonShortLink(http, payload.productUrl, payload.tag);
+    steps.push({ step: "Gerar link curto (SiteStripe)", ok: true, detail: shortUrl });
+  } catch (error) {
+    steps.push({ step: "Gerar link curto (SiteStripe)", ok: false, detail: detail(error) });
+  }
+  try {
+    const info = await readAmazonProductInfo(http, payload.productUrl);
+    steps.push({
+      step: "Ler preço da página",
+      ok: Boolean(info.priceCents),
+      detail: info.priceCents ? `R$ ${(info.priceCents / 100).toFixed(2)}${info.title ? ` · ${info.title.slice(0, 60)}` : ""}` : "preço não encontrado",
+    });
+  } catch (error) {
+    steps.push({ step: "Ler preço da página", ok: false, detail: detail(error) });
+  }
+  return { steps };
+}
+
 export async function handleRequest(
   type: RequestType,
   rawPayload: unknown,
-  deps: { fetch: Fetch; now?: () => number },
+  /** fetch: pedidos ao Mercado Livre; amazonFetch: pedidos à Amazon (cada um na aba da sua loja). */
+  deps: { fetch: Fetch; amazonFetch?: Fetch; now?: () => number },
 ): Promise<ExtensionResult<RequestType>> {
   const parsed = parseRequest(type, rawPayload);
   if (!parsed.ok) return { ok: false, error: parsed.error };
@@ -101,6 +128,16 @@ export async function handleRequest(
         }
         return { ok: true, data: { items, hasMore: items.length > 0 } };
       }
+      case "amz.createLink": {
+        const { productUrl, tag } = parsed.payload as RequestPayload<"amz.createLink">;
+        return { ok: true, data: await createAmazonShortLink(deps.amazonFetch ?? deps.fetch, productUrl, tag) };
+      }
+      case "amz.productInfo": {
+        const { productUrl } = parsed.payload as RequestPayload<"amz.productInfo">;
+        return { ok: true, data: await readAmazonProductInfo(deps.amazonFetch ?? deps.fetch, productUrl) };
+      }
+      case "amz.diagnose":
+        return { ok: true, data: await diagnoseAmazon(deps.amazonFetch ?? deps.fetch, parsed.payload as RequestPayload<"amz.diagnose">) };
       default:
         // vitrine.*: tratados no service worker (precisam de chrome.storage e da origem do painel).
         return { ok: false, error: "Pedido desconhecido." };

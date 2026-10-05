@@ -1,7 +1,7 @@
 "use server";
 
 import { requireSession } from "@/lib/auth/current";
-import { CATEGORIES, ML_CATEGORY_IDS, ML_KEYWORD_SEARCHES } from "@/lib/catalog";
+import { AMAZON_BESTSELLER_CATEGORIES, CATEGORIES, ML_CATEGORY_IDS, ML_KEYWORD_SEARCHES } from "@/lib/catalog";
 import { isSystemAdmin } from "@/lib/ml-vitrine";
 
 /**
@@ -9,7 +9,7 @@ import { isSystemAdmin } from "@/lib/ml-vitrine";
  * do sistema, para a extensão dele enviar a vitrine do ML ao catálogo central.
  */
 export async function vitrineSetupAction(): Promise<
-  { ok: true; token: string; categories: string[]; searches: string[] } | { ok: false; error: string }
+  { ok: true; token: string; categories: string[]; searches: string[]; amazonCategories: string[] } | { ok: false; error: string }
 > {
   const { user } = await requireSession();
   if (!isSystemAdmin(user.email)) return { ok: false, error: "Só o administrador do sistema pode ativar a vitrine." };
@@ -22,5 +22,6 @@ export async function vitrineSetupAction(): Promise<
     token,
     categories: CATEGORIES.flatMap((c) => ML_CATEGORY_IDS[c.value] ?? []),
     searches: Object.keys(ML_KEYWORD_SEARCHES),
+    amazonCategories: Object.keys(AMAZON_BESTSELLER_CATEGORIES),
   };
 }

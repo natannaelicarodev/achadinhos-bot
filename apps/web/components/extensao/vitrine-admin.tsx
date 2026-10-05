@@ -48,9 +48,9 @@ export function VitrineAdmin() {
     run(async () => {
       const setup = await vitrineSetupAction();
       if (!setup.ok) return setup;
-      return callExtension("vitrine.configure", { enabled: true, token: setup.token, categories: setup.categories, searches: setup.searches });
+      return callExtension("vitrine.configure", { enabled: true, token: setup.token, categories: setup.categories, searches: setup.searches, amazonCategories: setup.amazonCategories });
     });
-  const disable = () => run(() => callExtension("vitrine.configure", { enabled: false, token: null, categories: [], searches: [] }));
+  const disable = () => run(() => callExtension("vitrine.configure", { enabled: false, token: null, categories: [], searches: [], amazonCategories: [] }));
   const runNow = () => run(() => callExtension("vitrine.runNow", {}));
 
   if (!status) {
@@ -63,7 +63,7 @@ export function VitrineAdmin() {
         <strong className={status.enabled ? "text-green-700" : "text-muted-foreground"}>
           {status.enabled ? "ativada" : "desativada"}
         </strong>
-        {status.running ? " · atualizando agora (leva uns 3 a 4 minutos)..." : ""}
+        {status.running ? " · atualizando agora (leva uns 5 a 6 minutos)..." : ""}
       </p>
       {status.lastRunAt ? (
         <p className={status.lastResult?.ok ? "text-muted-foreground" : "text-destructive"}>

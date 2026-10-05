@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   amazonAffiliateUrl,
+  canonicalAmazonShortLink,
+  isAmazonShortLink,
+  isOwnAmazonLink,
+  resolveAmazonShortLink,
   AffiliateLinkError,
   extractProductInfo,
   fetchProductInfo,
@@ -189,6 +193,33 @@ describe("credenciais do cliente a partir de link colado", () => {
     });
     expect(await readSheinAffiliateId("https://onelink.shein.com/3/xyz", { fetch })).toEqual({ affiliateId: "7654321" });
     await expect(readSheinAffiliateId("abc")).rejects.toThrow("Shein");
+  });
+});
+
+describe("Amazon: link curto da SiteStripe (link.amazon -> amzlinks.in -> produto)", () => {
+  const SHORT = "https://link.amazon/B0Ex4mpl0";
+  const MIDDLE = "https://amzlinks.in/B0Ex4mpl0";
+  const PRODUCT =
+    "https://www.amazon.com.br/GameSir-Galileo/dp/B0CM3C9HRG?linkCode=sl2&tag=cliente-20&linkId=abc&ref_=as_li_ss_tl";
+
+  it("segue os dois saltos e lê a etiqueta e o produto", async () => {
+    const { fetch, calls } = fakeFetch({ [SHORT]: () => redirect(MIDDLE, 302), [MIDDLE]: () => redirect(PRODUCT, 302) });
+    const resolved = await resolveAmazonShortLink(SHORT, { fetch });
+    expect(resolved).toMatchObject({ tag: "cliente-20", product: { store: "AMAZON", externalId: "B0CM3C9HRG" } });
+    expect(calls).toHaveLength(2);
+    expect(isAmazonShortLink(new URL(SHORT))).toBe(true);
+    expect(isAmazonShortLink(new URL("https://www.amazon.com.br/dp/B0CM3C9HRG"))).toBe(false);
+    expect(canonicalAmazonShortLink(new URL(`${SHORT}?x=1`))).toBe(SHORT);
+  });
+
+  it("é do cliente só se a etiqueta bater (e o produto, quando informado)", () => {
+    const resolved = { tag: "cliente-20", product: { externalId: "B0CM3C9HRG" } };
+    expect(isOwnAmazonLink(resolved, { tag: "cliente-20" })).toBe(true);
+    expect(isOwnAmazonLink(resolved, { tag: "cliente-20" }, "B0CM3C9HRG")).toBe(true);
+    expect(isOwnAmazonLink(resolved, { tag: "cliente-20" }, "B000000000")).toBe(false);
+    expect(isOwnAmazonLink(resolved, { tag: "outra-20" })).toBe(false);
+    expect(isOwnAmazonLink({ tag: null, product: null }, { tag: "cliente-20" })).toBe(false);
+    expect(isOwnAmazonLink(resolved, null)).toBe(false);
   });
 });
 
