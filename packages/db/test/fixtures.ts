@@ -86,6 +86,23 @@ export async function seedTenant(prisma: PrismaClient, name: string) {
   const extensionToken = await prisma.extensionToken.create({
     data: { tenantId: tenant.id, userId: user.id, tokenHash: `hash-${slug}` },
   });
+  const reportSnapshot = await prisma.storeReportSnapshot.create({
+    data: {
+      tenantId: tenant.id,
+      store: "MERCADO_LIVRE",
+      rangeDays: 30,
+      periodStart: new Date("2026-09-05T03:00:00Z"),
+      periodEnd: new Date("2026-10-05T03:00:00Z"),
+      clicks: 10,
+      buyers: 1,
+      orders: 1,
+      units: 1,
+      salesCents: 1000,
+      notEffectiveSalesCents: 0,
+      commissionCents: 100,
+      fetchedAt: new Date(),
+    },
+  });
 
   return {
     tenant,
@@ -106,6 +123,7 @@ export async function seedTenant(prisma: PrismaClient, name: string) {
     messageTemplate,
     autopilot,
     extensionToken,
+    reportSnapshot,
   };
 }
 

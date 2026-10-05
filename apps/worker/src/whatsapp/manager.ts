@@ -321,6 +321,12 @@ export class WhatsAppManager {
     await db.$transaction([
       db.whatsAppSessionKey.deleteMany({ where: { channelId } }),
       db.whatsAppSession.deleteMany({ where: { channelId } }),
+      // Cliques ficam (contam para o cliente e a oferta); só perdem o vínculo com post e grupo,
+      // que somem junto com o número.
+      db.click.updateMany({
+        where: { OR: [{ group: { channelId } }, { post: { group: { channelId } } }] },
+        data: { groupId: null, postId: null },
+      }),
       db.channel.deleteMany({ where: { id: channelId } }),
     ]);
     await this.deps.redis.del(redisKeys.qr(channelId), redisKeys.testSends(channelId));

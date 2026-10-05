@@ -29,6 +29,11 @@ const envSchema = z.object({
   AUTOPILOT_MAX_PRICE_AGE_HOURS: z.coerce.number().positive().max(24 * 7).default(6),
   // Modo acelerado para testar com um grupo (ignorado em produção).
   AUTOPILOT_DEV_FAST: z.enum(["true", "false"]).default("false"),
+  // Encurtador próprio (fase 6): DESLIGADO por padrão (as mensagens levam o link curto da
+  // própria loja, mais confiável). Com "true", os links dos posts viram {base}/o/{código}.
+  TRACKED_LINKS_ENABLED: z.enum(["true", "false"]).default("false"),
+  APP_URL: z.url().optional(),
+  SHORT_LINK_BASE_URL: z.url().optional(),
 });
 
 /** No .env, `VAR=""` significa "não definida". */

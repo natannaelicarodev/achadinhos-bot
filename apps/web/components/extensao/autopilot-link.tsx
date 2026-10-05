@@ -54,22 +54,27 @@ export function AutopilotLink() {
       <p>
         Nesta extensão:{" "}
         <strong className={status.enabled ? "text-green-700" : "text-muted-foreground"}>
-          {status.enabled ? "ligada ao piloto automático" : "desligada"}
+          {status.enabled ? "ligada ao painel" : "desligada"}
         </strong>
       </p>
       {status.lastRunAt ? (
         <p className={status.lastResult?.ok ? "text-muted-foreground" : "text-destructive"}>
-          Última verificação: {dateTime.format(new Date(status.lastRunAt))} — {status.lastResult?.message}
+          Links do piloto: {dateTime.format(new Date(status.lastRunAt))} — {status.lastResult?.message}
+        </p>
+      ) : null}
+      {status.reportsLastRunAt ? (
+        <p className={status.reportsLastResult?.ok ? "text-muted-foreground" : "text-destructive"}>
+          Relatórios das lojas: {dateTime.format(new Date(status.reportsLastRunAt))} — {status.reportsLastResult?.message}
         </p>
       ) : null}
       <div className="flex flex-wrap gap-2">
         {status.enabled ? (
           <Button variant="outline" onClick={() => void disable()} disabled={busy}>
-            Desligar do piloto
+            Desligar do painel
           </Button>
         ) : (
           <Button onClick={() => void enable()} disabled={busy}>
-            Usar no piloto automático
+            Ligar ao painel
           </Button>
         )}
       </div>

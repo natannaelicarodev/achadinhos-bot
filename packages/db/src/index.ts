@@ -71,5 +71,6 @@ export type {
   MessageTemplate,
   AutopilotSettings,
   ExtensionToken,
+  StoreReportSnapshot,
 } from "./generated/prisma/client";
 export * from "./autopilot";

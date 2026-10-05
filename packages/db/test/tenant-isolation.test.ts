@@ -39,6 +39,7 @@ describe("forTenant: leitura", () => {
       dbA.messageTemplate.findMany(),
       dbA.autopilotSettings.findMany(),
       dbA.extensionToken.findMany(),
+      dbA.storeReportSnapshot.findMany(),
     ]);
     for (const rows of lists) {
       expect(rows).toHaveLength(1);
@@ -69,6 +70,7 @@ describe("forTenant: leitura", () => {
       TenantScopeError,
     );
     expect(await dbA.extensionToken.findUnique({ where: { id: b.extensionToken.id } })).toBeNull();
+    expect(await dbA.storeReportSnapshot.findUnique({ where: { id: b.reportSnapshot.id } })).toBeNull();
     expect(await dbA.extensionToken.findUnique({ where: { tokenHash: b.extensionToken.tokenHash } })).toBeNull();
     expect(await dbA.whatsAppSession.findUnique({ where: { channelId: b.channel.id } })).toBeNull();
     expect(
@@ -245,6 +247,7 @@ describe("exclusão de tenant", () => {
       db.prisma.messageTemplate.count({ where }),
       db.prisma.autopilotSettings.count({ where }),
       db.prisma.extensionToken.count({ where }),
+      db.prisma.storeReportSnapshot.count({ where }),
     ]);
     expect(counts.every((n) => n === 0)).toBe(true);
     expect(await db.prisma.offer.count({ where: { tenantId: b.tenant.id } })).toBe(1);

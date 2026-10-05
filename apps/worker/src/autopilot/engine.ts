@@ -76,6 +76,8 @@ export interface AutopilotDeps {
   env?: Record<string, string | undefined>;
   /** Modo acelerado (só desenvolvimento): ritmo e intervalos curtos para testar com um grupo. */
   fast?: boolean;
+  /** Base do encurtador próprio (SHORT_LINK_BASE_URL ou APP_URL). Sem ela, vai o link de afiliado direto. */
+  shortLinkBase?: string;
 }
 
 /** Ritmo do modo acelerado (AUTOPILOT_DEV_FAST, nunca em produção). */
@@ -88,7 +90,12 @@ export const FAST_MODE = {
 
 const STATUS_QUEUED: Prisma.PostWhereInput["status"] = { in: ["SCHEDULED", "SENDING", "AWAITING_LINK"] };
 
-const newShortCode = () => randomBytes(8).toString("base64url").slice(0, 10);
+/** Código do link curto (/o/{código}): 7 letras e números, um por post (= oferta + grupo). */
+const SHORT_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+export function newShortCode(length = 7): string {
+  const bytes = randomBytes(length);
+  return Array.from(bytes, (b) => SHORT_CODE_ALPHABET[b % SHORT_CODE_ALPHABET.length]).join("");
+}
 
 async function settingsOf(db: TenantDb, tenantId: string): Promise<Settings> {
   return (await db.autopilotSettings.findUnique({ where: { tenantId } })) ?? DEFAULT_AUTOPILOT;
@@ -477,6 +484,9 @@ export async function dispatchChannel(
     await retryOrFail(deps, db, channel, post.id, attempt, message, now, interval, { countForChannel: false });
     return { channelId: channel.id, failed: post.id, error: message };
   }
+
+  // Encurtador próprio: o texto leva {base}/o/{código}; o post guarda o link de afiliado (destino do clique).
+  if (deps.shortLinkBase && link) text = text.split(link).join(`${deps.shortLinkBase}/o/${post.shortCode}`);
 
   try {
     const sent = await sendOfferToWhatsApp(
