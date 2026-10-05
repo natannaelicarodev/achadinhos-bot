@@ -94,3 +94,37 @@ describe("piloto + links curtos pela extensão do cliente", () => {
     expect(seen).toEqual({ store: "AMAZON", externalId: "B0CM3C9HRG" });
   });
 });
+
+describe("relatório do Mercado Livre enviado pela extensão", () => {
+  const snapshot = (rangeDays: 7 | 30, clicks: number) => ({
+    store: "MERCADO_LIVRE" as const,
+    rangeDays,
+    periodStart: "2026-09-05T03:00:00.000Z",
+    periodEnd: "2026-10-05T03:00:00.000Z",
+    clicks,
+    buyers: 5,
+    orders: 11,
+    units: 12,
+    salesCents: 203719,
+    notEffectiveSalesCents: 0,
+    commissionCents: 24297,
+  });
+
+  it("guarda um retrato por período e substitui o antigo; formato inválido é recusado", async () => {
+    const { reportsPayloadSchema, saveReportSnapshots } = await import("@/lib/store-reports");
+    const { tenant } = await seed("rep-ml");
+    await saveReportSnapshots(db.prisma, tenant.id, reportsPayloadSchema.parse({ snapshots: [snapshot(7, 40), snapshot(30, 100)] }), NOW);
+    await saveReportSnapshots(db.prisma, tenant.id, reportsPayloadSchema.parse({ snapshots: [snapshot(30, 147)] }), NOW);
+    const rows = await db.prisma.storeReportSnapshot.findMany({ where: { tenantId: tenant.id }, orderBy: { rangeDays: "asc" } });
+    expect(rows.map((r) => [r.rangeDays, r.clicks, r.commissionCents])).toEqual([
+      [7, 40, 24297],
+      [30, 147, 24297],
+    ]);
+    expect(reportsPayloadSchema.safeParse({ snapshots: [{ ...snapshot(30, 1), rangeDays: 90 }] }).success).toBe(false);
+    expect(reportsPayloadSchema.safeParse({ snapshots: [{ ...snapshot(30, -1) }] }).success).toBe(false);
+    // Amazon no mesmo formato (um retrato por loja e período).
+    await saveReportSnapshots(db.prisma, tenant.id, reportsPayloadSchema.parse({ snapshots: [{ ...snapshot(30, 64), store: "AMAZON" }] }), NOW);
+    expect(await db.prisma.storeReportSnapshot.count({ where: { tenantId: tenant.id } })).toBe(3);
+    expect(reportsPayloadSchema.safeParse({ snapshots: [{ ...snapshot(30, 1), store: "SHEIN" }] }).success).toBe(false);
+  });
+});

@@ -105,11 +105,11 @@ model Plan {
 }
 
 model Tenant {
-  id               String               @id @default(cuid())
+  id               String                @id @default(cuid())
   name             String
-  slug             String               @unique
-  createdAt        DateTime             @default(now())
-  updatedAt        DateTime             @updatedAt
+  slug             String                @unique
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
   users            User[]
   subscriptions    Subscription[]
   channels         Channel[]
@@ -126,6 +126,7 @@ model Tenant {
   messageTemplate  MessageTemplate?
   autopilot        AutopilotSettings?
   extensionTokens  ExtensionToken[]
+  reportSnapshots  StoreReportSnapshot[]
 }
 
 // ---------- Auth ----------
@@ -269,21 +270,23 @@ model WhatsAppSessionKey {
 }
 
 model Group {
-  id                String   @id @default(cuid())
+  id                String       @id @default(cuid())
   tenantId          String
-  tenant            Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant            Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   channelId         String
-  channel           Channel  @relation(fields: [channelId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  channel           Channel      @relation(fields: [channelId, tenantId], references: [id, tenantId], onDelete: Cascade)
   externalId        String // JID do WhatsApp ou chat_id do Telegram
   name              String
-  active            Boolean  @default(true) // o número ainda participa do grupo
-  postingEnabled    Boolean  @default(false) // marcado pelo usuário para receber posts
-  canSend           Boolean  @default(true) // false se "só admins enviam" e o número não é admin
-  isAdmin           Boolean  @default(false) // o número é admin do grupo (filtro padrão do painel)
+  active            Boolean      @default(true) // o número ainda participa do grupo
+  postingEnabled    Boolean      @default(false) // marcado pelo usuário para receber posts
+  canSend           Boolean      @default(true) // false se "só admins enviam" e o número não é admin
+  isAdmin           Boolean      @default(false) // o número é admin do grupo (filtro padrão do painel)
   participantsCount Int?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
   posts             Post[]
+  clicks            Click[]
+  conversions       Conversion[]
 
   @@unique([id, tenantId])
   @@unique([channelId, externalId])
@@ -456,6 +459,9 @@ model Click {
   offer       Offer        @relation(fields: [offerId, tenantId], references: [id, tenantId], onDelete: Cascade)
   postId      String?
   post        Post?        @relation(fields: [postId, tenantId], references: [id, tenantId], onDelete: NoAction)
+  // Grupo onde o link foi clicado (cópia do grupo do post, para os relatórios por grupo)
+  groupId     String?
+  group       Group?       @relation(fields: [groupId, tenantId], references: [id, tenantId], onDelete: NoAction)
   ipHash      String? // SHA-256 do IP + salt (sem IP cru, LGPD)
   userAgent   String?
   referer     String?
@@ -464,25 +470,34 @@ model Click {
 
   @@unique([id, tenantId])
   @@index([tenantId, createdAt])
+  @@index([postId, ipHash, createdAt]) // repetição: mesmo IP no mesmo post conta 1 vez a cada 30 min
+  @@index([tenantId, groupId, createdAt])
 }
 
 model Conversion {
-  id              String   @id @default(cuid())
+  id              String    @id @default(cuid())
   tenantId        String
-  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   store           Store
   externalOrderId String
   offerId         String?
-  offer           Offer?   @relation(fields: [offerId, tenantId], references: [id, tenantId], onDelete: NoAction)
+  offer           Offer?    @relation(fields: [offerId, tenantId], references: [id, tenantId], onDelete: NoAction)
   clickId         String?
-  click           Click?   @relation(fields: [clickId, tenantId], references: [id, tenantId], onDelete: NoAction)
+  click           Click?    @relation(fields: [clickId, tenantId], references: [id, tenantId], onDelete: NoAction)
   amountCents     Int
   commissionCents Int
   occurredAt      DateTime
-  createdAt       DateTime @default(now())
+  // Relatório da loja (fase 6): grupo pelos subIds do link, status e horário do clique
+  groupId         String?
+  group           Group?    @relation(fields: [groupId, tenantId], references: [id, tenantId], onDelete: NoAction)
+  status          String? // status da loja (ex.: Shopee PENDING / COMPLETED / CANCELLED)
+  clickedAt       DateTime? // horário do clique que gerou a venda (a loja informa)
+  updatedAt       DateTime  @default(now()) @updatedAt
+  createdAt       DateTime  @default(now())
 
   @@unique([tenantId, store, externalOrderId])
   @@index([tenantId, occurredAt])
+  @@index([tenantId, groupId, occurredAt])
 }
 
 model StoreCredential {
@@ -558,4 +573,28 @@ model ExtensionToken {
 
   @@unique([tenantId, userId])
   @@index([tenantId, lastSeenAt])
+}
+
+// Último retrato do relatório de uma loja por período (ex.: Mercado Livre, 7 e 30 dias),
+// lido pela extensão do cliente no painel de afiliados dele. Um por loja e período.
+model StoreReportSnapshot {
+  id                     String   @id @default(cuid())
+  tenantId               String
+  tenant                 Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  store                  Store
+  rangeDays              Int // 7 ou 30
+  periodStart            DateTime
+  periodEnd              DateTime
+  clicks                 Int
+  buyers                 Int
+  orders                 Int // pedidos
+  units                  Int // unidades vendidas
+  salesCents             Int
+  notEffectiveSalesCents Int
+  commissionCents        Int // ganho estimado
+  fetchedAt              DateTime
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@unique([tenantId, store, rangeDays])
 }

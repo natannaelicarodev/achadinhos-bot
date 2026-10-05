@@ -12,6 +12,7 @@ export {
   type ProductOfferArgs,
 } from "./shopee/reader";
 export { ShopeeLinkGenerator, sanitizeSubId, shopeeErrorMessage } from "./shopee/links";
+export { ShopeeReportReader, conversionsFromNodes, parseSubIds, type ShopeeOrderConversion } from "./shopee/report";
 export {
   storeOfHost,
   parseHttpsUrl,

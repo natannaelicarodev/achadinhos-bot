@@ -131,6 +131,9 @@ export interface AutopilotLinkStatus {
   enabled: boolean;
   lastRunAt: string | null;
   lastResult: { ok: boolean; message: string } | null;
+  /** Relatório do Mercado Livre (de hora em hora). */
+  reportsLastRunAt: string | null;
+  reportsLastResult: { ok: boolean; message: string } | null;
 }
 
 /** Estado da vitrine compartilhada nesta extensão (nunca devolve a chave). */

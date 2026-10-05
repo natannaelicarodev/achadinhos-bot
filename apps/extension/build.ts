@@ -58,6 +58,7 @@ const manifest = {
     "https://*.mercadolivre.com.br/*",
     "https://meli.la/*",
     "https://www.amazon.com.br/*",
+    "https://associados.amazon.com.br/*",
     ...new Set(origins.map(matchPattern)),
   ],
   // scripting: pedidos de dentro de uma aba do ML. storage + alarms: vitrine de hora em hora.

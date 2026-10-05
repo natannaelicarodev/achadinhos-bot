@@ -53,3 +53,7 @@ export const CATALOG_SCHEDULER_ID = "catalog-mining";
 /** Piloto automático + fila de envio aos grupos (só o worker usa). */
 export const AUTOPILOT_QUEUE = "autopilot";
 export const AUTOPILOT_SCHEDULER_ID = "autopilot-tick";
+
+/** Relatórios das lojas (vendas por grupo; só o worker usa). */
+export const REPORTS_QUEUE = "reports";
+export const REPORTS_SCHEDULER_ID = "reports-sync";

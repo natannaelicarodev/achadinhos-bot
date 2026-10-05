@@ -31,7 +31,7 @@ const FRESHNESS_STORES: Store[] = ["SHOPEE", "AMAZON", "MERCADO_LIVRE"];
 export async function loadAutopilotOverview(tenantId: string, now: Date = new Date()) {
   const db = forTenant(tenantId);
   const dayStart = startOfLocalDay(now);
-  const [settingsRow, subscription, channels, groups, credentials, sentToday, queue] = await Promise.all([
+  const [settingsRow, subscription, channels, groups, credentials, sentToday, queue, clicksToday] = await Promise.all([
     db.autopilotSettings.findUnique({ where: { tenantId } }),
     getCurrentSubscription(tenantId),
     db.channel.findMany({ where: { type: "WHATSAPP" }, orderBy: { createdAt: "asc" } }),
@@ -49,8 +49,9 @@ export async function loadAutopilotOverview(tenantId: string, now: Date = new Da
       where: { OR: [{ createdAt: { gte: dayStart } }, { status: { in: ["SCHEDULED", "SENDING", "AWAITING_LINK"] } }] },
       orderBy: [{ createdAt: "desc" }],
       take: 100,
-      include: { group: { select: { name: true } }, offer: { select: { title: true } } },
+      include: { group: { select: { name: true } }, offer: { select: { title: true } }, _count: { select: { clicks: true } } },
     }),
+    db.click.count({ where: { createdAt: { gte: dayStart } } }),
   ]);
   const settings = settingsRow ?? { ...DEFAULT_AUTOPILOT, tenantId };
 
@@ -100,6 +101,7 @@ export async function loadAutopilotOverview(tenantId: string, now: Date = new Da
     settings,
     plan: { name: subscription?.plan.name ?? "Sem plano", maxOffersPerDay: subscription?.plan.maxPostsPerDay ?? 0 },
     offersToday,
+    clicksToday,
     channels: channelStats,
     groups,
     targetCount: targets.length,
@@ -111,6 +113,8 @@ export async function loadAutopilotOverview(tenantId: string, now: Date = new Da
     maxAgeHours,
     queue,
     devFast: process.env.AUTOPILOT_DEV_FAST === "true" && process.env.NODE_ENV !== "production",
+    /** Link rastreável /o/ ligado? (padrão: não; a mensagem leva o link curto da loja) */
+    trackedLinks: process.env.TRACKED_LINKS_ENABLED === "true",
   };
 }
 

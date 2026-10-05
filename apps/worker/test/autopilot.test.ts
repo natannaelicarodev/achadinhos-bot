@@ -323,6 +323,24 @@ describe("Amazon no piloto: só com link curto (link.amazon) da extensão do cli
 });
 
 describe("fila de envio", () => {
+  it("encurtador próprio: o texto leva {base}/o/{código do post}; o post guarda o link de afiliado", async () => {
+    const { tenant, deps, tdb, socket } = await setup();
+    await product("p1");
+    const withShort = { ...deps, shortLinkBase: "https://lnk.exemplo.com" };
+    await pickForTenant(withShort, tenant.id, T0);
+    await sendAll(withShort, T0);
+    const posts = await tdb.post.findMany();
+    expect(posts).toHaveLength(2);
+    for (const post of posts) {
+      expect(post.shortCode).toMatch(/^[A-Za-z0-9]{7}$/);
+      expect(post.messageText).toContain(`https://lnk.exemplo.com/o/${post.shortCode}`);
+      expect(post.messageText).not.toContain("s.shopee.com.br");
+      expect(post.affiliateUrl).toBe(`https://s.shopee.com.br/p1-${post.groupId}`);
+    }
+    expect(new Set(posts.map((p) => p.shortCode)).size).toBe(2); // um código por oferta + grupo
+    expect(socket.sent.every((m) => m.text.includes("https://lnk.exemplo.com/o/"))).toBe(true);
+  });
+
   it("link da Shopee por grupo (subIds [tenant, grupo]) e histórico imutável", async () => {
     const { tenant, deps, tdb, groups, socket } = await setup();
     await product("p1");

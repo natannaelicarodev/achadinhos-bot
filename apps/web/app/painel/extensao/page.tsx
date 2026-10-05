@@ -87,12 +87,12 @@ export default async function ExtensaoPage() {
         {ml.success || amazon.success ? (
           <Card className="lg:col-span-2">
             <CardHeader>
-              <CardTitle>Piloto automático com link curto (Mercado Livre e Amazon)</CardTitle>
+              <CardTitle>Ligar a extensão ao painel</CardTitle>
               <CardDescription>
-                O piloto automático só posta produtos do Mercado Livre e da Amazon com o seu link curto (meli.la e
-                link.amazon), e quem gera esses links é esta extensão, com a sua conta. Ligando aqui, enquanto este Chrome
-                estiver aberto (logado no Mercado Livre e na sua conta de Associados da Amazon), a extensão gera de minuto em
-                minuto os links dos produtos que o piloto escolheu. Com o Chrome fechado, o piloto posta só Shopee.
+                Com a extensão ligada, enquanto este Chrome estiver aberto (logado no Mercado Livre e na sua conta de
+                Associados da Amazon): o piloto automático posta Mercado Livre e Amazon com o seu link curto (meli.la e
+                link.amazon), gerado de minuto em minuto por esta extensão; e o relatório do Mercado Livre (cliques, vendas e
+                ganho) é lido de hora em hora para a página Relatórios. Com o Chrome fechado, o piloto posta só Shopee.
               </CardDescription>
             </CardHeader>
             <CardContent>

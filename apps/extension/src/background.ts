@@ -3,7 +3,20 @@
 import { handleRequest } from "./handlers";
 import { readBestsellers } from "./amazon";
 import { AUTOPILOT_LINKS_EVERY_MINUTES, syncAutopilotLinks } from "./autopilot-links";
-import { AMAZON_SITE, fetchFromAmazonTab, fetchFromMlTab, holdMlTab, holdStoreTab } from "./store-tab";
+import { ML_REPORT_RANGES, readMlReport, type MlReportSnapshot } from "./ml-report";
+import { AMAZON_REPORT_RANGES, readAmazonReport, sessionFromParts, type AmazonReportSnapshot } from "./amazon-report";
+
+const REPORTS_ENDPOINT_PATH = "/api/extension/reports";
+import {
+  AMAZON_SITE,
+  ASSOCIATES_SITE,
+  fetchFromAmazonTab,
+  fetchFromAssociatesTab,
+  fetchFromMlTab,
+  holdMlTab,
+  holdStoreTab,
+  readAssociatesDomFromTab,
+} from "./store-tab";
 import { parseRequest, requestSchemas, type HubItem, type RequestPayload, type RequestType, type VitrineStatus, type AutopilotLinkStatus } from "./protocol";
 import {
   AMAZON_PAGES_PER_HOUR,
@@ -180,6 +193,102 @@ async function configureVitrine(origin: string, payload: RequestPayload<"vitrine
 // ---------- Piloto automático do cliente: meli.la dos produtos do ML ----------
 
 const AUTOPILOT_ALARM = "autopilot-links";
+/** Relatório do ML (cliques, vendas, ganho) de hora em hora, com a mesma chave. */
+const REPORTS_ALARM = "ml-reports";
+const REPORTS_EVERY_MINUTES = 60;
+let reportsRunning = false;
+/** Cada loja tem até 60 s: aba que não abre ou página que não responde não trava as próximas rodadas. */
+const REPORT_STEP_TIMEOUT_MS = 60_000;
+function withTimeout<T>(task: Promise<T>, store: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`${store} demorou demais para responder (mais de 60 s). Deixe a página da loja aberta e logada neste Chrome.`)),
+      REPORT_STEP_TIMEOUT_MS,
+    );
+    task.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      },
+    );
+  });
+}
+
+async function runReports(): Promise<void> {
+  const { config } = await loadAutopilot();
+  if (!config || reportsRunning) return;
+  reportsRunning = true;
+  let result: { ok: boolean; message: string };
+  try {
+    const now = Date.now();
+    const auth = { authorization: `Bearer ${config.token}` };
+    // O painel diz quais lojas o cliente configurou (e a etiqueta da Amazon).
+    const setup = await fetch(new URL(REPORTS_ENDPOINT_PATH, config.endpoint).toString(), { headers: auth });
+    if (!setup.ok) throw new Error(`O painel recusou (HTTP ${setup.status}).`);
+    const { mercadoLivre, amazonStoreId } = (await setup.json()) as { mercadoLivre?: boolean; amazonStoreId?: string | null };
+    const snapshots: (MlReportSnapshot | AmazonReportSnapshot)[] = [];
+    const parts: string[] = [];
+    if (mercadoLivre) {
+      try {
+        const ml = await withTimeout(
+          holdMlTab(async () => {
+            const list = [];
+            for (const range of ML_REPORT_RANGES) list.push(await readMlReport(fetchFromMlTab, range, now));
+            return list;
+          }),
+          "Mercado Livre",
+        );
+        snapshots.push(...ml);
+        parts.push(`Mercado Livre: ${ml.find((x) => x.rangeDays === 30)?.clicks ?? 0} cliques em 30 dias`);
+      } catch (error) {
+        parts.push(`Mercado Livre: ${error instanceof Error ? error.message : "falha"}`);
+      }
+    }
+    if (amazonStoreId) {
+      try {
+        const amz = await withTimeout(holdStoreTab(ASSOCIATES_SITE, async () => {
+          const list = [];
+          // Sessão (csrf + token da página do Associados) lida uma vez e usada nos dois períodos.
+          // O pageState é montado pelo JavaScript da página: lê da aba já carregada.
+          const dom = await readAssociatesDomFromTab();
+          if ("diag" in dom) {
+            throw new Error(`Não achei a sua sessão na página do Associados (vi: ${dom.diag}). Entre na sua conta de Associados neste Chrome.`);
+          }
+          const session = sessionFromParts(dom.csrfToken, dom.pageState);
+          for (const range of AMAZON_REPORT_RANGES) {
+            list.push(await readAmazonReport(fetchFromAssociatesTab, amazonStoreId, range, now, session));
+          }
+          return list;
+        }), "Amazon");
+        snapshots.push(...amz);
+        parts.push(`Amazon: ${amz.find((x) => x.rangeDays === 30)?.clicks ?? 0} cliques em 30 dias`);
+      } catch (error) {
+        parts.push(`Amazon: ${error instanceof Error ? error.message : "falha"}`);
+      }
+    }
+    if (snapshots.length > 0) {
+      const response = await fetch(new URL(REPORTS_ENDPOINT_PATH, config.endpoint).toString(), {
+        method: "POST",
+        headers: { "content-type": "application/json", ...auth },
+        body: JSON.stringify({ snapshots }),
+      });
+      if (!response.ok) throw new Error(`O painel recusou o relatório (HTTP ${response.status}).`);
+    }
+    result = {
+      ok: snapshots.length > 0 && parts.every((p) => !/falha|Entre|não abriu|inesperado/i.test(p)),
+      message: parts.length > 0 ? `${parts.join(" · ")}.` : "Nenhuma loja com relatório configurada (Credenciais).",
+    };
+  } catch (error) {
+    result = { ok: false, message: error instanceof Error ? error.message : "Falha ao ler o relatório do Mercado Livre." };
+  } finally {
+    reportsRunning = false;
+  }
+  await chrome.storage.local.set({ reportsState: { lastRunAt: new Date().toISOString(), lastResult: result } });
+}
 interface AutopilotConfig {
   token: string;
   endpoint: string;
@@ -196,7 +305,15 @@ async function loadAutopilot() {
 
 async function autopilotStatus(): Promise<AutopilotLinkStatus> {
   const { config, state } = await loadAutopilot();
-  return { enabled: Boolean(config), lastRunAt: state.lastRunAt, lastResult: state.lastResult };
+  const stored = await chrome.storage.local.get("reportsState");
+  const reports = (stored.reportsState as { lastRunAt: string | null; lastResult: AutopilotLinkStatus["lastResult"] } | undefined) ?? null;
+  return {
+    enabled: Boolean(config),
+    lastRunAt: state.lastRunAt,
+    lastResult: state.lastResult,
+    reportsLastRunAt: reports?.lastRunAt ?? null,
+    reportsLastResult: reports?.lastResult ?? null,
+  };
 }
 
 async function runAutopilotLinks(): Promise<void> {
@@ -233,10 +350,14 @@ async function configureAutopilot(origin: string, payload: RequestPayload<"autop
   if (!payload.enabled || !payload.token) {
     await chrome.storage.local.remove(["autopilotConfig", "autopilotState"]);
     await chrome.alarms.clear(AUTOPILOT_ALARM);
+    await chrome.alarms.clear(REPORTS_ALARM);
+    await chrome.storage.local.remove("reportsState");
     return autopilotStatus();
   }
   await chrome.storage.local.set({ autopilotConfig: { token: payload.token, endpoint: origin } satisfies AutopilotConfig });
   await chrome.alarms.create(AUTOPILOT_ALARM, { periodInMinutes: AUTOPILOT_LINKS_EVERY_MINUTES });
+  await chrome.alarms.create(REPORTS_ALARM, { periodInMinutes: REPORTS_EVERY_MINUTES });
+  void runReports();
   void runAutopilotLinks();
   return autopilotStatus();
 }
@@ -244,6 +365,7 @@ async function configureAutopilot(origin: string, payload: RequestPayload<"autop
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALARM) void runVitrine();
   if (alarm.name === AUTOPILOT_ALARM) void runAutopilotLinks();
+  if (alarm.name === REPORTS_ALARM) void runReports();
 });
 
 // ---------- Pedidos do painel ----------

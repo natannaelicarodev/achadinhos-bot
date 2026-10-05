@@ -88,6 +88,11 @@ export default async function AgendamentoPage() {
             <p className="text-2xl font-semibold">
               {o.offersToday} de {o.plan.maxOffersPerDay} <span className="text-base font-normal text-muted-foreground">ofertas hoje (plano {o.plan.name})</span>
             </p>
+            {o.trackedLinks ? (
+              <p>
+                <strong>{o.clicksToday}</strong> {o.clicksToday === 1 ? "clique" : "cliques"} hoje nos seus links (robôs de pré-visualização não contam).
+              </p>
+            ) : null}
             {o.channels.length === 0 ? (
               <p className="text-muted-foreground">
                 Nenhum número de WhatsApp. <Link href="/painel/canais" className="underline underline-offset-4">Conectar um número</Link>
@@ -200,6 +205,7 @@ export default async function AgendamentoPage() {
                       <th className="py-2 pr-3 font-medium">Produto</th>
                       <th className="py-2 pr-3 font-medium">Grupo</th>
                       <th className="py-2 pr-3 font-medium">Horário</th>
+                      {o.trackedLinks ? <th className="py-2 pr-3 font-medium">Cliques</th> : null}
                       <th className="py-2 font-medium">Detalhe</th>
                     </tr>
                   </thead>
@@ -221,6 +227,9 @@ export default async function AgendamentoPage() {
                           <td className="py-2 pr-3 whitespace-nowrap">
                             {p.sentAt ? `enviado ${when(p.sentAt, now)}` : p.scheduledAt ? `previsto ${when(p.scheduledAt, now)}` : "—"}
                           </td>
+                          {o.trackedLinks ? (
+                            <td className="py-2 pr-3 tabular-nums">{p.status === "SENT" ? p._count.clicks : "—"}</td>
+                          ) : null}
                           <td className="py-2 text-xs text-muted-foreground">
                             {p.error ??
                               (p.status === "AWAITING_LINK"

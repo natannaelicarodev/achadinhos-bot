@@ -13,6 +13,11 @@ export interface StoreSite {
 
 export const ML_SITE: StoreSite = { tabPattern: "https://www.mercadolivre.com.br/*", openUrl: AFFILIATE_HUB_URL };
 export const AMAZON_SITE: StoreSite = { tabPattern: "https://www.amazon.com.br/*", openUrl: "https://www.amazon.com.br/" };
+/** Painel de Associados da Amazon (relatórios). */
+export const ASSOCIATES_SITE: StoreSite = {
+  tabPattern: "https://associados.amazon.com.br/*",
+  openUrl: "https://associados.amazon.com.br/p/reporting/earnings",
+};
 
 const TAB_LOAD_TIMEOUT_MS = 20_000;
 
@@ -107,4 +112,37 @@ export function fetchFromStoreTab(site: StoreSite): typeof fetch {
 
 export const fetchFromMlTab = fetchFromStoreTab(ML_SITE);
 export const fetchFromAmazonTab = fetchFromStoreTab(AMAZON_SITE);
+export const fetchFromAssociatesTab = fetchFromStoreTab(ASSOCIATES_SITE);
 export const holdMlTab = <T>(task: () => Promise<T>) => holdStoreTab(ML_SITE, task);
+
+/** Roda DENTRO da aba e de cada quadro (serializada pelo Chrome): procura o csrf-token e o pageState. */
+async function readAssociatesDom(): Promise<{ csrfToken: string; pageState: string; diag: string }> {
+  let csrfToken = "";
+  let pageState = "";
+  for (let attempt = 0; attempt < 20; attempt++) {
+    csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") ?? "";
+    pageState = (document.getElementById("pageState") ?? document.querySelector("[data-page-state]"))?.getAttribute("data-page-state") ?? "";
+    if (csrfToken && pageState) break;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  const diag = `${location.host}${location.pathname} "${document.title.slice(0, 40)}" csrf:${csrfToken ? "sim" : "não"} pageState:${pageState ? "sim" : "não"}`;
+  return { csrfToken, pageState, diag };
+}
+
+/**
+ * Sessão do Associados lida da página JÁ CARREGADA (o pageState é montado pelo JavaScript
+ * da página; o HTML baixado não tem). Procura em todos os quadros da aba do Associados
+ * (usa a aberta ou abre uma). Sem sessão: devolve o que viu em cada quadro (diagnóstico).
+ */
+export async function readAssociatesDomFromTab(): Promise<{ csrfToken: string; pageState: string } | { diag: string }> {
+  return withStoreTab(ASSOCIATES_SITE, async (tabId) => {
+    const injections = await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, func: readAssociatesDom });
+    const results = injections
+      .map((i) => i.result as { csrfToken: string; pageState: string; diag: string } | undefined)
+      .filter((r): r is { csrfToken: string; pageState: string; diag: string } => Boolean(r));
+    const csrfToken = results.find((r) => r.csrfToken)?.csrfToken ?? "";
+    const pageState = results.find((r) => r.pageState)?.pageState ?? "";
+    if (csrfToken && pageState) return { csrfToken, pageState };
+    return { diag: results.map((r) => r.diag).join(" | ") || "nenhum quadro respondeu" };
+  });
+}

@@ -19,6 +19,7 @@ export const TENANT_SCOPED_MODELS = [
   "MessageTemplate",
   "AutopilotSettings",
   "ExtensionToken",
+  "StoreReportSnapshot",
 ] as const;
 
 const scopedModels = new Set<string>(TENANT_SCOPED_MODELS);

@@ -7,6 +7,7 @@ import { ShopeeMiner } from "./catalog/shopee";
 import { loadEnv } from "./env";
 import { startAutopilot } from "./queues/autopilot";
 import { startCatalogMining } from "./queues/catalog";
+import { startReports } from "./queues/reports";
 import { startWhatsappQueueWorker } from "./queues/whatsapp";
 import { createRedis } from "./redis";
 import { ChannelLocks } from "./whatsapp/lock";
@@ -66,7 +67,14 @@ const autopilot = await startAutopilot(createRedis(env.REDIS_URL), {
     AUTOPILOT_MAX_PRICE_AGE_HOURS: String(env.AUTOPILOT_MAX_PRICE_AGE_HOURS),
   },
   fast,
+  // Link rastreável /o/ só se ligado; padrão: link curto da própria loja na mensagem.
+  ...(env.TRACKED_LINKS_ENABLED === "true"
+    ? { shortLinkBase: (env.SHORT_LINK_BASE_URL ?? env.APP_URL ?? "http://localhost:3000").replace(/\/+$/, "") }
+    : {}),
 });
+
+// Relatórios das lojas: vendas da Shopee por grupo (credencial de cada cliente).
+const reports = await startReports(createRedis(env.REDIS_URL), { prisma, logger });
 
 logger.info({ owner, env: env.NODE_ENV }, "[worker] iniciado");
 manager.startAll().catch((err: unknown) => logger.error({ err }, "[worker] falha ao reconectar números"));
@@ -77,6 +85,8 @@ async function shutdown(signal: string): Promise<void> {
   stopping = true;
   logger.info(`[worker] ${signal} recebido, encerrando`);
   await queueWorker.close().catch(() => undefined);
+  await reports.worker.close().catch(() => undefined);
+  await reports.queue.close().catch(() => undefined);
   await autopilot.worker.close().catch(() => undefined);
   await autopilot.queue.close().catch(() => undefined);
   await catalog.worker.close().catch(() => undefined);
