@@ -42,7 +42,8 @@ export async function saveStoreCredential(
   const secrets = secretsSchema.parse(input.secrets);
   const encrypted = encrypt(JSON.stringify(secrets), key, aadFor(tenantId, input.store));
   const label = input.label ?? null;
-  const status = { verifiedAt: input.verifiedAt ?? null, lastError: null };
+  // Salvar de novo tira a loja da pausa do piloto automático (credencial corrigida).
+  const status = { verifiedAt: input.verifiedAt ?? null, lastError: null, autopilotPausedAt: null };
 
   return db.storeCredential.upsert({
     where: { tenantId_store: { tenantId, store: input.store } },

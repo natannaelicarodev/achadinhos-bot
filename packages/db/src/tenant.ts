@@ -17,6 +17,8 @@ export const TENANT_SCOPED_MODELS = [
   "FeatureRequest",
   "Favorite",
   "MessageTemplate",
+  "AutopilotSettings",
+  "ExtensionToken",
 ] as const;
 
 const scopedModels = new Set<string>(TENANT_SCOPED_MODELS);

@@ -4,6 +4,7 @@ import { amazonSecretsSchema, mercadoLivreSecretsSchema } from "@achadinhos/stor
 import { DownloadIcon } from "lucide-react";
 import type { Metadata } from "next";
 import { ExtensionDiagnostic, ExtensionStatusBadge } from "@/components/extensao/extension-status";
+import { AutopilotLink } from "@/components/extensao/autopilot-link";
 import { VitrineAdmin } from "@/components/extensao/vitrine-admin";
 import { PageHeader } from "@/components/painel/page-header";
 import { Button } from "@/components/ui/button";
@@ -83,6 +84,22 @@ export default async function ExtensaoPage() {
             <ExtensionDiagnostic store="amz" tag={amazon.success ? amazon.data.tag : null} />
           </CardContent>
         </Card>
+        {ml.success || amazon.success ? (
+          <Card className="lg:col-span-2">
+            <CardHeader>
+              <CardTitle>Piloto automático com link curto (Mercado Livre e Amazon)</CardTitle>
+              <CardDescription>
+                O piloto automático só posta produtos do Mercado Livre e da Amazon com o seu link curto (meli.la e
+                link.amazon), e quem gera esses links é esta extensão, com a sua conta. Ligando aqui, enquanto este Chrome
+                estiver aberto (logado no Mercado Livre e na sua conta de Associados da Amazon), a extensão gera de minuto em
+                minuto os links dos produtos que o piloto escolheu. Com o Chrome fechado, o piloto posta só Shopee.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <AutopilotLink />
+            </CardContent>
+          </Card>
+        ) : null}
         {isSystemAdmin(user.email) ? (
           <Card className="lg:col-span-2">
             <CardHeader>

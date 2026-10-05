@@ -398,6 +398,7 @@ export async function sendToGroupsAction(input: z.input<typeof sendSchema>): Pro
   return {
     ok: true,
     text,
-    message: "Oferta salva com link e mensagem prontos. O envio aos grupos será feito pelo agendamento (próxima fase).",
+    message:
+      "Oferta na fila de envio: sai para os seus grupos dentro da janela de horário, com intervalo entre os envios. Acompanhe em Agendamento.",
   };
 }

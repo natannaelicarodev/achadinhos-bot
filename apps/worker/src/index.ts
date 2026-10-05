@@ -5,6 +5,7 @@ import { pino } from "pino";
 import { AmazonMiner } from "./catalog/amazon";
 import { ShopeeMiner } from "./catalog/shopee";
 import { loadEnv } from "./env";
+import { startAutopilot } from "./queues/autopilot";
 import { startCatalogMining } from "./queues/catalog";
 import { startWhatsappQueueWorker } from "./queues/whatsapp";
 import { createRedis } from "./redis";
@@ -53,6 +54,20 @@ const catalog = await startCatalogMining(createRedis(env.REDIS_URL), {
   ],
 });
 
+// Piloto automático + fila de envio aos grupos (usa os sockets deste worker).
+const fast = env.AUTOPILOT_DEV_FAST === "true" && env.NODE_ENV !== "production";
+if (fast) logger.warn("[piloto] MODO ACELERADO ligado (AUTOPILOT_DEV_FAST): ritmo e intervalos curtos, só para teste");
+const autopilot = await startAutopilot(createRedis(env.REDIS_URL), {
+  prisma,
+  logger,
+  getSocket: (channelId) => manager.getSender(channelId),
+  env: {
+    ML_AUTOPILOT_ENABLED: env.ML_AUTOPILOT_ENABLED,
+    AUTOPILOT_MAX_PRICE_AGE_HOURS: String(env.AUTOPILOT_MAX_PRICE_AGE_HOURS),
+  },
+  fast,
+});
+
 logger.info({ owner, env: env.NODE_ENV }, "[worker] iniciado");
 manager.startAll().catch((err: unknown) => logger.error({ err }, "[worker] falha ao reconectar números"));
 
@@ -62,6 +77,8 @@ async function shutdown(signal: string): Promise<void> {
   stopping = true;
   logger.info(`[worker] ${signal} recebido, encerrando`);
   await queueWorker.close().catch(() => undefined);
+  await autopilot.worker.close().catch(() => undefined);
+  await autopilot.queue.close().catch(() => undefined);
   await catalog.worker.close().catch(() => undefined);
   await catalog.queue.close().catch(() => undefined);
   await manager.stopAll().catch(() => undefined);

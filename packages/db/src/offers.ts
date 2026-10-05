@@ -42,6 +42,7 @@ export async function saveOfferForSending(
     messageText: input.messageText,
     status: "ACTIVE" as const,
     sendRequestedAt: now,
+    sendQueuedAt: null, // novo pedido: a fila cria os posts de novo
   };
 
   if (input.catalogProductId) {

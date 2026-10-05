@@ -24,6 +24,11 @@ const envSchema = z.object({
   AMAZON_CATALOG_CREDENTIAL_ID: z.string().min(1).optional(),
   AMAZON_CATALOG_CREDENTIAL_SECRET: z.string().min(1).optional(),
   AMAZON_CATALOG_PARTNER_TAG: z.string().min(1).optional(),
+  // Piloto automático (fase 5)
+  ML_AUTOPILOT_ENABLED: z.enum(["true", "false"]).default("false"),
+  AUTOPILOT_MAX_PRICE_AGE_HOURS: z.coerce.number().positive().max(24 * 7).default(6),
+  // Modo acelerado para testar com um grupo (ignorado em produção).
+  AUTOPILOT_DEV_FAST: z.enum(["true", "false"]).default("false"),
 });
 
 /** No .env, `VAR=""` significa "não definida". */

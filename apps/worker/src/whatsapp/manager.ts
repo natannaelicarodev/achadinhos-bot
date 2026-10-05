@@ -21,7 +21,7 @@ import type { Redis } from "ioredis";
 import type { Logger } from "pino";
 import { usePostgresAuthState, type PostgresAuthState } from "./auth-state";
 import { syncGroups, selfIdsFrom } from "./groups";
-import type { ChannelLocks } from "./lock";
+import { LOCK_TTL_MS, type ChannelLocks } from "./lock";
 import { decideOnClose, REASONS } from "./reconnect";
 import { SendError, sendOfferToWhatsApp, type SendResult, type WhatsAppSender } from "./send";
 
@@ -29,6 +29,8 @@ const GROUP_CACHE_TTL_MS = 5 * 60_000;
 const SENT_CACHE_SIZE = 500;
 const STARTUP_STAGGER_MS = 1_500;
 const LOCK_RENEW_EVERY_MS = 20_000;
+/** Ao ligar, se a trava do número ainda estiver com o processo anterior: tentativas depois que ela expira. */
+const STARTUP_LOCK_RETRIES = 3;
 
 interface Connection {
   tenantId: string;
@@ -96,9 +98,26 @@ export class WhatsAppManager {
         await this.connect(channel.tenantId, channel.id);
       } catch (error) {
         this.log.warn({ channelId: channel.id, err: error }, "[whatsapp] número não reconectado");
+        // Reinício rápido (ex.: Ctrl+C no Windows): a trava do processo anterior pode
+        // continuar no Redis até expirar. Tenta de novo depois do prazo da trava.
+        if (error instanceof SendError) this.retryConnectAfterLock(channel.tenantId, channel.id);
       }
       await sleep(STARTUP_STAGGER_MS);
     }
+  }
+
+  private retryConnectAfterLock(tenantId: string, channelId: string, attempt = 1): void {
+    if (attempt > STARTUP_LOCK_RETRIES) return;
+    const timer = setTimeout(() => {
+      if (this.connections.get(channelId)?.open) return;
+      this.connect(tenantId, channelId)
+        .then(() => this.log.info({ channelId }, "[whatsapp] número reconectado depois da trava expirar"))
+        .catch((error: unknown) => {
+          this.log.warn({ channelId, err: error, attempt }, "[whatsapp] trava ainda ocupada; nova tentativa");
+          this.retryConnectAfterLock(tenantId, channelId, attempt + 1);
+        });
+    }, LOCK_TTL_MS + 5_000);
+    timer.unref?.();
   }
 
   /** Conecta (ou reconecta) um número. Sem sessão salva, gera QR Code. */
@@ -209,6 +228,11 @@ export class WhatsAppManager {
           ...(phone ? { externalId: phone } : {}),
         },
       });
+      // Aquecimento (7 dias) conta da PRIMEIRA conexão; reconectar não reinicia.
+      await forTenant(tenantId, this.deps.prisma).channel.updateMany({
+        where: { id: channelId, firstConnectedAt: null },
+        data: { firstConnectedAt: new Date() },
+      });
       this.log.info({ channelId }, "[whatsapp] conectado");
       await this.syncGroups(tenantId, channelId).catch((err: unknown) =>
         this.log.warn({ channelId, err }, "[whatsapp] falha ao sincronizar grupos"),
@@ -318,6 +342,11 @@ export class WhatsAppManager {
       Object.values(all),
       selfIdsFrom(connection.sock.user),
     );
+  }
+
+  /** Socket aberto do número neste worker (fila do piloto automático). */
+  getSender(channelId: string): WhatsAppSender | undefined {
+    return this.senderFor(channelId);
   }
 
   private senderFor(channelId: string): WhatsAppSender | undefined {

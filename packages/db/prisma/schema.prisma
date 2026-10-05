@@ -72,6 +72,13 @@ enum PostStatus {
   SENT
   FAILED
   CANCELED
+  DISCARDED // passou do horário (fila atrasou ou janela fechou): não é enviado
+  AWAITING_LINK // Mercado Livre no piloto: esperando a extensão do cliente gerar o meli.la
+}
+
+enum PostSource {
+  AUTO // piloto automático
+  MANUAL // botão "Enviar para meus grupos"
 }
 
 // ---------- Globais (sem tenant) ----------
@@ -115,6 +122,8 @@ model Tenant {
   featureRequests  FeatureRequest[]
   favorites        Favorite[]
   messageTemplate  MessageTemplate?
+  autopilot        AutopilotSettings?
+  extensionTokens  ExtensionToken[]
 }
 
 // ---------- Auth ----------
@@ -132,6 +141,7 @@ model User {
   sessions            Session[]
   passwordResetTokens PasswordResetToken[]
   featureRequests     FeatureRequest[]
+  extensionTokens     ExtensionToken[]
 
   @@unique([id, tenantId]) // alvo de FK composta (FeatureRequest)
   @@index([tenantId])
@@ -193,20 +203,26 @@ model Subscription {
 }
 
 model Channel {
-  id              String               @id @default(cuid())
-  tenantId        String
-  tenant          Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  type            ChannelType
-  name            String
-  status          ChannelStatus        @default(DISCONNECTED)
-  statusReason    String? // motivo em pt-BR exibido no painel (ex.: "Sessão encerrada no celular")
-  externalId      String? // nº do WhatsApp ou @username do bot Telegram
-  lastConnectedAt DateTime?
-  createdAt       DateTime             @default(now())
-  updatedAt       DateTime             @updatedAt
-  groups          Group[]
-  whatsAppSession WhatsAppSession?
-  whatsAppKeys    WhatsAppSessionKey[]
+  id                   String               @id @default(cuid())
+  tenantId             String
+  tenant               Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  type                 ChannelType
+  name                 String
+  status               ChannelStatus        @default(DISCONNECTED)
+  statusReason         String? // motivo em pt-BR exibido no painel (ex.: "Sessão encerrada no celular")
+  externalId           String? // nº do WhatsApp ou @username do bot Telegram
+  lastConnectedAt      DateTime?
+  firstConnectedAt     DateTime? // primeira conexão (aquecimento do número: 7 dias)
+  // Piloto automático por número
+  autopilotPausedAt    DateTime? // pausado (por você ou após falhas seguidas): não envia
+  autopilotPauseReason String? // motivo em pt-BR (faixa de aviso no painel)
+  consecutiveFailures  Int                  @default(0) // posts que falharam seguidos (zera ao enviar)
+  nextSendAt           DateTime? // próximo envio liberado (intervalo aleatório entre envios)
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  groups               Group[]
+  whatsAppSession      WhatsAppSession?
+  whatsAppKeys         WhatsAppSessionKey[]
 
   @@unique([id, tenantId])
   @@index([tenantId])
@@ -297,7 +313,8 @@ model Offer {
   clicks             Click[]
   conversions        Conversion[]
   messageText        String? // mensagem pronta (template já preenchido) na hora do "Enviar para meus grupos"
-  sendRequestedAt    DateTime? // pedido de envio; a fila de envio aos grupos é da fase 5
+  sendRequestedAt    DateTime? // pedido de envio ("Enviar para meus grupos")
+  sendQueuedAt       DateTime? // quando o pedido virou posts na fila (não processa de novo)
   // Produto do catálogo central de onde a oferta veio ("Divulgar este produto").
   catalogProductId   String?
   catalogProduct     CatalogProduct? @relation(fields: [catalogProductId], references: [id], onDelete: SetNull)
@@ -400,16 +417,29 @@ model Post {
   group             Group      @relation(fields: [groupId, tenantId], references: [id, tenantId], onDelete: Cascade)
   shortCode         String     @unique // link rastreável /r/<shortCode>
   status            PostStatus @default(SCHEDULED)
+  source            PostSource @default(MANUAL)
   scheduledAt       DateTime?
+  expiresAt         DateTime? // depois disso é DESCARTADO (fila atrasou), nunca enviado
   sentAt            DateTime?
+  attempts          Int        @default(0)
   externalMessageId String?
   error             String?
+  // Cópia do que foi (ou será) enviado: histórico imutável depois de SENT.
+  // Atualizar a Offer nunca altera posts antigos.
+  store             Store?
+  productExternalId String? // id do produto na loja (não repetir no grupo)
+  messageText       String? // texto final enviado
+  affiliateUrl      String? // link usado no texto (Shopee: com subIds [tenant, grupo])
+  priceCents        Int?
+  imageUrl          String?
   createdAt         DateTime   @default(now())
   updatedAt         DateTime   @updatedAt
   clicks            Click[]
 
   @@unique([id, tenantId])
   @@index([tenantId, status, scheduledAt])
+  @@index([groupId, store, productExternalId, createdAt])
+  @@index([tenantId, sentAt])
 }
 
 // Relações opcionais com FK composta usam NoAction: o Postgres não consegue
@@ -454,19 +484,21 @@ model Conversion {
 }
 
 model StoreCredential {
-  id         String    @id @default(cuid())
-  tenantId   String
-  tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  store      Store
-  label      String?
-  ciphertext Bytes // AES-256-GCM do JSON das credenciais
-  iv         Bytes // 12 bytes, aleatório por gravação
-  authTag    Bytes // 16 bytes
-  keyVersion Int       @default(1)
-  verifiedAt DateTime? // "Sincronizado": teste real ok (Shopee) ou dados validados (demais lojas)
-  lastError  String? // motivo em pt-BR do último teste que falhou
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  id                String    @id @default(cuid())
+  tenantId          String
+  tenant            Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  store             Store
+  label             String?
+  ciphertext        Bytes // AES-256-GCM do JSON das credenciais
+  iv                Bytes // 12 bytes, aleatório por gravação
+  authTag           Bytes // 16 bytes
+  keyVersion        Int       @default(1)
+  verifiedAt        DateTime? // "Sincronizado": teste real ok (Shopee) ou dados validados (demais lojas)
+  lastError         String? // motivo em pt-BR do último teste que falhou
+  // Piloto automático: loja pausada porque a credencial falhou ao gerar link (volta ao salvar de novo).
+  autopilotPausedAt DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   @@unique([tenantId, store])
 }
@@ -479,4 +511,49 @@ model MessageTemplate {
   body      String
   headline  String // valor padrão de {headline} (editável em cada mensagem)
   updatedAt DateTime @updatedAt
+}
+
+// Piloto automático do tenant (um por tenant). Horários no fuso America/Sao_Paulo.
+model AutopilotSettings {
+  tenantId                String            @id
+  tenant                  Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  enabled                 Boolean           @default(false)
+  weekdays                Int[]             @default([0, 1, 2, 3, 4, 5, 6]) // 0 = domingo
+  windowStartMinute       Int               @default(480) // 08:00 (minutos desde 00:00)
+  windowEndMinute         Int               @default(1320) // 22:00
+  offersPerHour           Int               @default(2)
+  // Filtros (lista vazia / null = sem filtro)
+  stores                  Store[]           @default([])
+  categories              CatalogCategory[] @default([])
+  minDiscountPct          Int?
+  minPriceCents           Int?
+  maxPriceCents           Int?
+  minRating               Float?
+  minCommissionPct        Float?
+  // Grupos que recebem (vazio = todos com "Postar neste grupo" ligado)
+  groupIds                String[]          @default([])
+  repeatDays              Int               @default(3) // não repetir o produto (loja + id) no grupo por N dias
+  // Intervalo aleatório entre os grupos da MESMA oferta (o intervalo entre ofertas vem de offersPerHour)
+  groupIntervalMinSeconds Int               @default(30)
+  groupIntervalMaxSeconds Int               @default(90)
+  channelDailyLimit       Int               @default(80) // máximo de MENSAGENS por número por dia (após o aquecimento)
+  lastPickAt              DateTime? // último produto escolhido (ritmo de ofertas por hora)
+  createdAt               DateTime          @default(now())
+  updatedAt               DateTime          @updatedAt
+}
+
+// Chave da extensão do cliente para o piloto automático (gerar meli.la no Chrome dele).
+// Uma por usuário; o banco guarda só o SHA-256 da chave.
+model ExtensionToken {
+  id         String    @id @default(cuid())
+  tenantId   String
+  tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User      @relation(fields: [userId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  tokenHash  String    @unique
+  lastSeenAt DateTime? // último "sinal de vida" da extensão (o piloto só escolhe ML se < 10 min)
+  createdAt  DateTime  @default(now())
+
+  @@unique([tenantId, userId])
+  @@index([tenantId, lastSeenAt])
 }
