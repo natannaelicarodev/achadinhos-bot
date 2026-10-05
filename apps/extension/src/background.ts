@@ -250,10 +250,12 @@ async function runReports(): Promise<void> {
     }
     if (amazonStoreId) {
       try {
+        // Aba NOVA do Associados a cada leitura: o token do pageState expira, e uma aba aberta
+        // há horas no Chrome do cliente devolve 401 ("Entre na sua conta...") mesmo logado.
         const amz = await withTimeout(holdStoreTab(ASSOCIATES_SITE, async () => {
           const list = [];
           // Sessão (csrf + token da página do Associados) lida uma vez e usada nos dois períodos.
-          // O pageState é montado pelo JavaScript da página: lê da aba já carregada.
+          // O pageState é montado pelo JavaScript da página: lê da aba recém-carregada.
           const dom = await readAssociatesDomFromTab();
           if ("diag" in dom) {
             throw new Error(`Não achei a sua sessão na página do Associados (vi: ${dom.diag}). Entre na sua conta de Associados neste Chrome.`);
@@ -263,7 +265,7 @@ async function runReports(): Promise<void> {
             list.push(await readAmazonReport(fetchFromAssociatesTab, amazonStoreId, range, now, session));
           }
           return list;
-        }), "Amazon");
+        }, { fresh: true }), "Amazon");
         snapshots.push(...amz);
         parts.push(`Amazon: ${amz.find((x) => x.rangeDays === 30)?.clicks ?? 0} cliques em 30 dias`);
       } catch (error) {
@@ -279,8 +281,8 @@ async function runReports(): Promise<void> {
       if (!response.ok) throw new Error(`O painel recusou o relatório (HTTP ${response.status}).`);
     }
     result = {
-      ok: snapshots.length > 0 && parts.every((p) => !/falha|Entre|não abriu|inesperado/i.test(p)),
-      message: parts.length > 0 ? `${parts.join(" · ")}.` : "Nenhuma loja com relatório configurada (Credenciais).",
+      ok: snapshots.length > 0 && parts.every((p) => !/falha|Entre|não abriu|recusou|inesperado/i.test(p)),
+      message: parts.length > 0 ? `${parts.map((p) => p.replace(/\.+$/, "")).join(" · ")}.` : "Nenhuma loja com relatório configurada (Credenciais).",
     };
   } catch (error) {
     result = { ok: false, message: error instanceof Error ? error.message : "Falha ao ler o relatório do Mercado Livre." };

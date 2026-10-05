@@ -1,5 +1,5 @@
 // Constantes do protocolo sem dependências (usadas pela ponte, que roda em toda página do painel).
-export const EXTENSION_VERSION = "0.9.4";
+export const EXTENSION_VERSION = "0.9.5";
 export const PANEL_SOURCE = "achadinhos-panel";
 export const EXTENSION_SOURCE = "achadinhos-extension";
 export const REQUEST_TYPES = ["ping", "ml.createLink", "ml.productInfo", "ml.diagnose", "ml.hubSearch",
