@@ -80,8 +80,11 @@ export default async function ConfiguracoesPage() {
           <CardHeader>
             <CardTitle>Planos</CardTitle>
             <CardDescription>
-              A troca de plano pelo painel chega junto com a cobrança automática. Até lá, para mudar de plano, fale com o
-              suporte.
+              Para assinar, trocar de plano ou cancelar, use a página{" "}
+              <Link href="/painel/assinatura" className="underline underline-offset-4">
+                Assinatura
+              </Link>
+              .
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">

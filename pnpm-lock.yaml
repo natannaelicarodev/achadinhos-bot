@@ -42,6 +42,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@achadinhos/billing':
+        specifier: workspace:*
+        version: link:../../packages/billing
       '@achadinhos/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -124,6 +127,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@achadinhos/billing':
+        specifier: workspace:*
+        version: link:../../packages/billing
       '@achadinhos/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -155,6 +161,25 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
     devDependencies:
+      vitest:
+        specifier: ^5.0.3
+        version: 5.0.3(@types/node@24.19.1)(vite@8.3.2(@types/node@24.19.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15))
+
+  packages/billing:
+    dependencies:
+      '@achadinhos/db':
+        specifier: workspace:*
+        version: link:../db
+      nodemailer:
+        specifier: ^10.0.14
+        version: 10.0.14
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+    devDependencies:
+      '@types/nodemailer':
+        specifier: ^8.0.2
+        version: 8.0.2
       vitest:
         specifier: ^5.0.3
         version: 5.0.3(@types/node@24.19.1)(vite@8.3.2(@types/node@24.19.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15))

@@ -1,5 +1,5 @@
 import { channelDailyLimitFor, forTenant, isWithinWindow, maxOffersPerHour, type Store } from "@achadinhos/db";
-import { createTestDatabase, type TestDatabase } from "@achadinhos/db/testing";
+import { createTestDatabase, grantTestPlan, type TestDatabase } from "@achadinhos/db/testing";
 import { MissingCredentialError, type ProductRef } from "@achadinhos/stores";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -79,9 +79,8 @@ async function setup(
       reportsLevel: "BASIC",
     },
   });
-  await prisma.subscription.create({
-    data: { tenantId: tenant.id, planId: plan.id, status: "ACTIVE", currentPeriodStart: new Date(T0.getTime() - DAY), currentPeriodEnd: new Date(T0.getTime() + 30 * DAY) },
-  });
+  // Plano pago (direito de uso como se a cobrança tivesse sido paga e conferida).
+  await grantTestPlan(prisma, tenant.id, plan.id, { start: new Date(T0.getTime() - DAY), end: new Date(T0.getTime() + 30 * DAY) });
   const channel = await prisma.channel.create({
     data: {
       tenantId: tenant.id,
@@ -589,5 +588,36 @@ describe("limite diário do número no piloto", () => {
     // 19 enviadas + 1 na fila = 20 de 20: não escolhe mais.
     await product("lim-2", { score: 98 });
     expect(await pickForTenant(deps, tenant.id, at(31 * MIN))).toEqual({ picked: false, reason: "limite diário dos números" });
+  });
+});
+
+describe("plano e cobrança no piloto (fase 9)", () => {
+  it("sem direito de uso pago (cobrança estornada): não escolhe, não envia e não enfileira manual", async () => {
+    const { tenant, deps, tdb, socket } = await setup();
+    await product("cob-1");
+    const revoke = () => db.prisma.entitlement.updateMany({ where: { tenantId: tenant.id }, data: { revokedAt: T0, revokeReason: "estorno" } });
+    await revoke();
+    expect(await pickForTenant(deps, tenant.id, T0)).toEqual({ picked: false, reason: "pagamento pendente" });
+    const offer = await tdb.offer.create({
+      data: { tenantId: tenant.id, store: "SHOPEE", title: "Manual", url: "https://shopee.com.br/m", affiliateUrl: "https://s.shopee.com.br/m", status: "ACTIVE", sendRequestedAt: T0 },
+    });
+    await queueManualOffers(deps, T0);
+    expect(await tdb.post.count({ where: { offerId: offer.id } })).toBe(0);
+    expect((await tdb.offer.findUniqueOrThrow({ where: { id: offer.id } })).sendQueuedAt).toBeNull(); // espera o pagamento
+    // Post que já estava na fila também não sai.
+    const plan = await tdb.subscription.findFirstOrThrow();
+    await grantTestPlan(db.prisma, tenant.id, plan.planId, { start: new Date(T0.getTime() - DAY), end: new Date(T0.getTime() + DAY) });
+    await pickForTenant(deps, tenant.id, T0);
+    await revoke();
+    await runDispatch(deps, at(MIN));
+    expect(socket.sent).toHaveLength(0);
+  });
+
+  it("grupos acima do limite do plano (troca para plano menor): envia só para os primeiros N", async () => {
+    const { tenant, deps, tdb } = await setup({ groups: 3 });
+    const sub = await tdb.subscription.findFirstOrThrow();
+    await db.prisma.plan.update({ where: { id: sub.planId }, data: { maxGroups: 2 } });
+    await product("cob-2");
+    expect(await pickForTenant(deps, tenant.id, T0)).toMatchObject({ picked: true, posts: 2 });
   });
 });

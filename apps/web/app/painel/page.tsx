@@ -5,7 +5,8 @@ import { getTenantDb } from "@/lib/auth/current";
 
 const dateFormat = new Intl.DateTimeFormat("pt-BR", { dateStyle: "long", timeZone: "America/Sao_Paulo" });
 
-export default async function InicioPage() {
+export default async function InicioPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
+  const emailParam = (await searchParams).email;
   const { db, user } = await getTenantDb();
   const [channels, groups, offers, subscription] = await Promise.all([
     db.channel.count(),
@@ -23,6 +24,15 @@ export default async function InicioPage() {
   return (
     <>
       <PageHeader title={`Olá, ${user.name.split(" ")[0]}!`} description="Resumo da sua conta." />
+      {emailParam === "confirmado" ? (
+        <p role="status" className="mb-4 rounded-lg border border-green-300 bg-green-50 p-3 text-sm text-green-800">
+          E-mail confirmado. Agora você pode assinar um plano e enviar ofertas aos seus grupos.
+        </p>
+      ) : emailParam === "link-invalido" ? (
+        <p role="status" className="mb-4 rounded-lg border border-destructive/40 p-3 text-sm text-destructive">
+          Link de confirmação inválido ou vencido. Peça outro em &quot;Reenviar link&quot;.
+        </p>
+      ) : null}
       <div className="grid gap-4 sm:grid-cols-3">
         {stats.map((stat) => (
           <Card key={stat.label}>

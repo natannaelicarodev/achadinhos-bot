@@ -4,6 +4,7 @@ import {
   assertCanAddWhatsappNumber,
   assertCanEnableGroupPosting,
   forTenant,
+  getSendingBlock,
   PlanLimitError,
 } from "@achadinhos/db";
 import { whatsappJobSchemas } from "@achadinhos/jobs";
@@ -130,6 +131,8 @@ export async function sendTestAction(_prev: ActionResult, formData: FormData): P
   const { user } = await requireSession();
   const parsed = sendTestForm.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { error: "Escreva o texto da mensagem (até 4096 caracteres)." };
+  const block = await getSendingBlock(user.tenantId);
+  if (block) return { error: block.message };
 
   const group = await forTenant(user.tenantId).group.findUnique({ where: { id: parsed.data.groupId } });
   if (!group) return { error: "Grupo não encontrado." };

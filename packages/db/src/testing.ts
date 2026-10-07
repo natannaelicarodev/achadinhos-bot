@@ -43,3 +43,21 @@ export async function createTestDatabase(options: { seedPlans?: boolean } = {}):
     },
   };
 }
+
+/**
+ * Testes: deixa a conta num plano PAGO (assinatura ativa + direito de uso como se a cobrança
+ * tivesse sido paga). Só para testes: no sistema, direito de uso só nasce de pagamento conferido.
+ */
+export async function grantTestPlan(
+  prisma: PrismaClient,
+  tenantId: string,
+  planId: string,
+  period: { start: Date; end: Date } = { start: new Date(Date.now() - 86_400_000), end: new Date(Date.now() + 365 * 86_400_000) },
+) {
+  const current = await prisma.subscription.findFirst({ where: { tenantId, status: { not: "CANCELED" } }, orderBy: { createdAt: "desc" } });
+  const data = { planId, status: "ACTIVE" as const, trialEndsAt: null, currentPeriodStart: period.start, currentPeriodEnd: period.end };
+  if (current) await prisma.subscription.update({ where: { id: current.id }, data });
+  else await prisma.subscription.create({ data: { tenantId, ...data } });
+  await prisma.entitlement.updateMany({ where: { tenantId, revokedAt: null }, data: { revokedAt: period.start, revokeReason: "teste" } });
+  await prisma.entitlement.create({ data: { tenantId, planId, source: "PAYMENT", startsAt: period.start, endsAt: period.end, asaasPaymentId: `test_${tenantId}_${planId}` } });
+}

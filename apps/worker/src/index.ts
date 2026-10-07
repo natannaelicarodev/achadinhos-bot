@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { hostname } from "node:os";
 import { getPrisma, recomputeHeadlineKeys, syncAdminAccounts } from "@achadinhos/db";
+import { AsaasClient } from "@achadinhos/billing";
 import { classifyForCatalog } from "@achadinhos/stores";
 import { pino } from "pino";
 import { AmazonMiner } from "./catalog/amazon";
@@ -87,7 +88,12 @@ const autopilot = await startAutopilot(createRedis(env.REDIS_URL), {
 });
 
 // Relatórios das lojas: vendas da Shopee por grupo (credencial de cada cliente).
-const reports = await startReports(createRedis(env.REDIS_URL), { prisma, logger });
+const reports = await startReports(createRedis(env.REDIS_URL), {
+  prisma,
+  logger,
+  // Cobrança: conferência no Asaas (corrige aviso do webhook que se perdeu).
+  asaas: env.ASAAS_API_KEY ? new AsaasClient({ apiKey: env.ASAAS_API_KEY, env: env.ASAAS_ENV }) : null,
+});
 
 logger.info({ owner, env: env.NODE_ENV }, "[worker] iniciado");
 manager.startAll().catch((err: unknown) => logger.error({ err }, "[worker] falha ao reconectar números"));

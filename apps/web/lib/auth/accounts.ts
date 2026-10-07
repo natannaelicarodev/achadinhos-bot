@@ -1,7 +1,8 @@
 import { randomBytes } from "node:crypto";
-import { grantAdminPlan, isAdminEmail, Prisma, startTrial, type PrismaClient } from "@achadinhos/db";
+import { Prisma, startTrial, type PrismaClient } from "@achadinhos/db";
 import { hashPassword, verifyDummyPassword, verifyPassword } from "./password";
 import type { SignUpInput } from "./schemas";
+import { TERMS_VERSION } from "../terms";
 import { invalidateUserSessions } from "./session";
 import { generateToken, hashToken } from "./tokens";
 
@@ -27,7 +28,6 @@ export async function signUp(
   client: PrismaClient,
   input: SignUpInput,
   now: Date = new Date(),
-  adminEmails: string | undefined = process.env.SYSTEM_ADMIN_EMAILS,
 ): Promise<{ ok: true; userId: string } | { ok: false; error: "EMAIL_TAKEN" }> {
   const existing = await client.user.findUnique({ where: { email: input.email }, select: { id: true } });
   if (existing) return { ok: false, error: "EMAIL_TAKEN" };
@@ -37,11 +37,18 @@ export async function signUp(
     const user = await client.$transaction(async (tx) => {
       const tenant = await tx.tenant.create({ data: { name: input.tenantName, slug: slugify(input.tenantName) } });
       const owner = await tx.user.create({
-        data: { tenantId: tenant.id, email: input.email, name: input.name, passwordHash, role: "OWNER" },
+        data: {
+          tenantId: tenant.id,
+          email: input.email,
+          name: input.name,
+          passwordHash,
+          role: "OWNER",
+          termsVersion: TERMS_VERSION,
+          termsAcceptedAt: now,
+        },
       });
       await startTrial(tx, tenant.id, now);
-      // Conta administradora do sistema (SYSTEM_ADMIN_EMAILS): plano "Administrador", sem limites.
-      if (isAdminEmail(input.email, adminEmails)) await grantAdminPlan(tx, tenant.id, now);
+      // Administrador (SYSTEM_ADMIN_EMAILS) só depois de confirmar o e-mail (verifyEmailToken).
       return owner;
     });
     return { ok: true, userId: user.id };

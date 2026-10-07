@@ -34,6 +34,9 @@ const envSchema = z.object({
   TRACKED_LINKS_ENABLED: z.enum(["true", "false"]).default("false"),
   APP_URL: z.url().optional(),
   SHORT_LINK_BASE_URL: z.url().optional(),
+  // Cobrança (fase 9): conferência das cobranças no Asaas de hora em hora (sem a chave, não roda).
+  ASAAS_API_KEY: z.string().min(1).optional(),
+  ASAAS_ENV: z.enum(["sandbox", "production"]).default("sandbox"),
 });
 
 /** No .env, `VAR=""` significa "não definida". */

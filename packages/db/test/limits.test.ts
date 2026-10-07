@@ -7,7 +7,7 @@ import {
   PlanLimitError,
 } from "../src/limits";
 import { startTrial } from "../src/subscription";
-import { createTestDatabase, type TestDatabase } from "../src/testing";
+import { createTestDatabase, grantTestPlan, type TestDatabase } from "../src/testing";
 
 let db: TestDatabase;
 
@@ -23,7 +23,8 @@ async function tenantOnPlan(slug: string, planCode: string) {
   const tenant = await db.prisma.tenant.create({ data: { name: slug, slug } });
   const sub = await startTrial(db.prisma, tenant.id);
   const plan = await db.prisma.plan.findUniqueOrThrow({ where: { code: planCode } });
-  await db.prisma.subscription.update({ where: { id: sub.id }, data: { planId: plan.id, status: "ACTIVE" } });
+  await grantTestPlan(db.prisma, tenant.id, plan.id);
+  void sub;
   return tenant;
 }
 

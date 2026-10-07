@@ -1,29 +1,34 @@
-import nodemailer from "nodemailer";
-import { getEnv } from "./env";
+// E-mails do painel (SMTP: Resend em produção; sem SMTP_HOST no dev, o link aparece no terminal).
+import { createMailer } from "@achadinhos/billing";
 
-/** Envia o link de recuperação. Sem SMTP_HOST (dev), só imprime o link no terminal. */
+/** Envia o link de recuperação. */
 export async function sendPasswordResetEmail(to: { email: string; name: string }, resetUrl: string) {
-  const env = getEnv();
-  const subject = "Redefinir sua senha — Achadinhos Bot";
-  const text = [
-    `Olá, ${to.name}!`,
-    "",
-    "Recebemos um pedido para redefinir a senha da sua conta.",
-    `Para criar uma nova senha, acesse (válido por 1 hora): ${resetUrl}`,
-    "",
-    "Se não foi você, ignore este e-mail. Sua senha continua a mesma.",
-  ].join("\n");
-
-  if (!env.SMTP_HOST) {
-    console.log(`[email] SMTP não configurado. Link de recuperação para ${to.email}:\n${resetUrl}`);
-    return;
-  }
-
-  const transporter = nodemailer.createTransport({
-    host: env.SMTP_HOST,
-    port: env.SMTP_PORT,
-    secure: env.SMTP_PORT === 465,
-    ...(env.SMTP_USER ? { auth: { user: env.SMTP_USER, pass: env.SMTP_PASS ?? "" } } : {}),
+  await createMailer()({
+    to: to.email,
+    subject: "Redefinir sua senha — Achadinhos Bot",
+    text: [
+      `Olá, ${to.name}!`,
+      "",
+      "Recebemos um pedido para redefinir a senha da sua conta.",
+      `Para criar uma nova senha, acesse (válido por 1 hora): ${resetUrl}`,
+      "",
+      "Se não foi você, ignore este e-mail. Sua senha continua a mesma.",
+    ].join("\n"),
   });
-  await transporter.sendMail({ from: env.SMTP_FROM, to: to.email, subject, text });
+}
+
+/** Envia o link de confirmação do e-mail (válido por 24 horas). */
+export async function sendVerificationEmail(to: { email: string; name: string }, verifyUrl: string) {
+  await createMailer()({
+    to: to.email,
+    subject: "Confirme seu e-mail — Achadinhos Bot",
+    text: [
+      `Olá, ${to.name}!`,
+      "",
+      "Para assinar um plano e enviar ofertas aos seus grupos, confirme o seu e-mail:",
+      verifyUrl,
+      "",
+      "O link vale por 24 horas. Se não foi você que criou a conta, ignore este e-mail.",
+    ].join("\n"),
+  });
 }

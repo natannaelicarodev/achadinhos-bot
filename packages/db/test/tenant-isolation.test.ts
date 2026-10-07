@@ -40,6 +40,9 @@ describe("forTenant: leitura", () => {
       dbA.autopilotSettings.findMany(),
       dbA.extensionToken.findMany(),
       dbA.storeReportSnapshot.findMany(),
+      dbA.payment.findMany(),
+      dbA.entitlement.findMany(),
+      dbA.billingAuditLog.findMany(),
     ]);
     for (const rows of lists) {
       expect(rows).toHaveLength(1);
@@ -71,6 +74,16 @@ describe("forTenant: leitura", () => {
     );
     expect(await dbA.extensionToken.findUnique({ where: { id: b.extensionToken.id } })).toBeNull();
     expect(await dbA.storeReportSnapshot.findUnique({ where: { id: b.reportSnapshot.id } })).toBeNull();
+    expect(await dbA.payment.findUnique({ where: { id: b.payment.id } })).toBeNull();
+    expect(await dbA.payment.findUnique({ where: { asaasPaymentId: b.payment.asaasPaymentId } })).toBeNull();
+    const entB = await db.prisma.entitlement.findFirstOrThrow({ where: { tenantId: b.tenant.id } });
+    expect(await dbA.entitlement.findUnique({ where: { id: entB.id } })).toBeNull();
+    const logB = await db.prisma.billingAuditLog.findFirstOrThrow({ where: { tenantId: b.tenant.id } });
+    expect(await dbA.billingAuditLog.findUnique({ where: { id: logB.id } })).toBeNull();
+    // Direito de uso não pode ser criado para outra conta pelo client do tenant.
+    await expect(
+      dbA.entitlement.create({ data: { tenantId: b.tenant.id, planId: "x", source: "PAYMENT", startsAt: new Date(), endsAt: new Date() } }),
+    ).rejects.toBeInstanceOf(TenantScopeError);
     expect(await dbA.extensionToken.findUnique({ where: { tokenHash: b.extensionToken.tokenHash } })).toBeNull();
     expect(await dbA.whatsAppSession.findUnique({ where: { channelId: b.channel.id } })).toBeNull();
     expect(
@@ -248,6 +261,9 @@ describe("exclusão de tenant", () => {
       db.prisma.autopilotSettings.count({ where }),
       db.prisma.extensionToken.count({ where }),
       db.prisma.storeReportSnapshot.count({ where }),
+      db.prisma.payment.count({ where }),
+      db.prisma.entitlement.count({ where }),
+      db.prisma.billingAuditLog.count({ where }),
     ]);
     expect(counts.every((n) => n === 0)).toBe(true);
     expect(await db.prisma.offer.count({ where: { tenantId: b.tenant.id } })).toBe(1);

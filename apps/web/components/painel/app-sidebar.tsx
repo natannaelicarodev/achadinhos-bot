@@ -3,12 +3,14 @@
 import {
   BarChart3Icon,
   CalendarClockIcon,
+  CreditCardIcon,
   HomeIcon,
   KeyRoundIcon,
   LinkIcon,
   LogOutIcon,
   PuzzleIcon,
   RadioTowerIcon,
+  ReceiptIcon,
   SettingsIcon,
   ShoppingBagIcon,
   TagIcon,
@@ -38,14 +40,29 @@ export const MENU = [
   { title: "Ofertas", href: "/painel/ofertas", icon: TagIcon },
   { title: "Agendamento", href: "/painel/agendamento", icon: CalendarClockIcon },
   { title: "Relatórios", href: "/painel/relatorios", icon: BarChart3Icon },
+  { title: "Assinatura", href: "/painel/assinatura", icon: CreditCardIcon },
   { title: "Configurações", href: "/painel/configuracoes", icon: SettingsIcon },
 ] as const;
+
+/** Só para as contas administradoras do sistema. */
+const ADMIN_MENU = [{ title: "Cobranças (admin)", href: "/painel/admin/cobrancas", icon: ReceiptIcon }] as const;
 
 function isActive(pathname: string, href: string): boolean {
   return href === "/painel" ? pathname === href : pathname === href || pathname.startsWith(`${href}/`);
 }
 
-export function AppSidebar({ tenantName, userName }: { tenantName: string; userName: string }) {
+export function AppSidebar({
+  tenantName,
+  userName,
+  admin = false,
+  reviewCount = 0,
+}: {
+  tenantName: string;
+  userName: string;
+  admin?: boolean;
+  /** Cobranças para revisar (administrador). */
+  reviewCount?: number;
+}) {
   const pathname = usePathname();
   return (
     <Sidebar>
@@ -59,7 +76,7 @@ export function AppSidebar({ tenantName, userName }: { tenantName: string; userN
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              {MENU.map((item) => (
+              {[...MENU, ...(admin ? ADMIN_MENU : [])].map((item) => (
                 <SidebarMenuItem key={item.href}>
                   <SidebarMenuButton
                     isActive={isActive(pathname, item.href)}
@@ -67,6 +84,14 @@ export function AppSidebar({ tenantName, userName }: { tenantName: string; userN
                   >
                     <item.icon />
                     <span>{item.title}</span>
+                    {item.href === "/painel/admin/cobrancas" && reviewCount > 0 ? (
+                      <span
+                        className="ml-auto rounded-full bg-destructive px-1.5 text-[10px] font-semibold text-white"
+                        aria-label={`${reviewCount} cobranças para revisar`}
+                      >
+                        {reviewCount}
+                      </span>
+                    ) : null}
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}

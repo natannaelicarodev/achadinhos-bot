@@ -104,7 +104,12 @@ export async function seedTenant(prisma: PrismaClient, name: string) {
     },
   });
 
+  const payment = await prisma.payment.create({
+    data: { tenantId: tenant.id, asaasPaymentId: `pay_${slug}`, status: "PENDING", valueCents: 4700, dueDate: new Date("2026-10-10T03:00:00Z") },
+  });
+
   return {
+    payment,
     tenant,
     user,
     subscription,
