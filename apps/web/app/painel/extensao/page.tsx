@@ -100,7 +100,7 @@ export default async function ExtensaoPage() {
             </CardContent>
           </Card>
         ) : null}
-        {isSystemAdmin(user.email) ? (
+        {isSystemAdmin(user) ? (
           <Card className="lg:col-span-2">
             <CardHeader>
               <CardTitle>Vitrine do Mercado Livre e da Amazon no catálogo (administrador)</CardTitle>

@@ -95,3 +95,23 @@ describe("trial", () => {
     expect(byTenant[valido.id]).toBe("TRIALING");
   });
 });
+
+describe("contas antigas (antes dos direitos de uso)", () => {
+  it("teste grátis válido sem registro ganha o direito do teste; vencido não ganha nada", async () => {
+    const now = new Date("2026-10-06T12:00:00Z");
+    const starter = await db.prisma.plan.findUniqueOrThrow({ where: { code: "starter" } });
+    const make = async (slug: string, trialEndsAt: Date) => {
+      const tenant = await newTenant(slug);
+      await db.prisma.subscription.create({
+        data: { tenantId: tenant.id, planId: starter.id, status: "TRIALING", trialEndsAt, currentPeriodStart: now, currentPeriodEnd: trialEndsAt },
+      });
+      return tenant.id;
+    };
+    const valid = await make("legado-ok", new Date(now.getTime() + 3 * DAY));
+    const expired = await make("legado-vencido", new Date(now.getTime() - DAY));
+    expect((await getCurrentSubscription(valid, { client: db.prisma, now }))?.plan.code).toBe("starter");
+    expect(await db.prisma.entitlement.count({ where: { tenantId: valid, source: "TRIAL" } })).toBe(1);
+    expect((await getCurrentSubscription(expired, { client: db.prisma, now }))?.plan.code).toBe("catalog");
+    expect(await db.prisma.entitlement.count({ where: { tenantId: expired } })).toBe(0);
+  });
+});

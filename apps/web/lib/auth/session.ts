@@ -18,6 +18,7 @@ const userSelect = {
   email: true,
   name: true,
   role: true,
+  emailVerifiedAt: true,
   tenant: { select: { id: true, name: true } },
 } as const;
 

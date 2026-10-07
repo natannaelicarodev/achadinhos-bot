@@ -14,7 +14,39 @@ export {
 } from "./store-credentials";
 export { startTrial, getCurrentSubscription, markExpiredTrialsPastDue, TRIAL_DAYS } from "./subscription";
 export { PLANS, ADMIN_PLAN, TRIAL_PLAN_CODE, FIRST_SENDING_PLAN_NAME, planAllowsSending, type PlanSeed } from "./plans";
-export { grantAdminPlan, isAdminEmail, parseAdminEmails, syncAdminAccounts, upsertAdminPlan } from "./admin";
+export {
+  applyAsaasPayment,
+  addCycle,
+  asaasDate,
+  getSendingBlock,
+  isPaidStatus,
+  isReversedStatus,
+  REVERSED_STATUSES,
+  PAID_STATUSES,
+  PAST_DUE_GRACE_DAYS,
+  PAYMENT_PENDING_MESSAGE,
+  EMAIL_NOT_VERIFIED_MESSAGE,
+  ownerEmailVerified,
+  acquireBillingLock,
+  releaseBillingLock,
+  serializable,
+  type ApplyResult,
+  type BillingPayment,
+  type SendingBlock,
+} from "./billing";
+export { grantAdminPlan, isAdminEmail, isVerifiedAdmin, parseAdminEmails, syncAdminAccounts, upsertAdminPlan } from "./admin";
+export {
+  cyclePrice,
+  ENTITLEMENT_GRACE_DAYS,
+  fallbackPlan,
+  grantEntitlement,
+  logBilling,
+  resolveEntitlement,
+  revokePaymentEntitlements,
+  revokeSourceEntitlements,
+  type GrantInput,
+  type ResolvedEntitlement,
+} from "./entitlements";
 export {
   PlanLimitError,
   NO_SENDING_MESSAGE,

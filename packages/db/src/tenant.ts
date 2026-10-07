@@ -20,6 +20,9 @@ export const TENANT_SCOPED_MODELS = [
   "AutopilotSettings",
   "ExtensionToken",
   "StoreReportSnapshot",
+  "Payment",
+  "Entitlement",
+  "BillingAuditLog",
 ] as const;
 
 const scopedModels = new Set<string>(TENANT_SCOPED_MODELS);

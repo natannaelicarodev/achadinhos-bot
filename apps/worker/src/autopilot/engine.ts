@@ -15,6 +15,7 @@ import {
   DEFAULT_AUTOPILOT,
   forTenant,
   getCurrentSubscription,
+  getSendingBlock,
   isWithinWindow,
   MANUAL_POST_MAX_DELAY_MS,
   maxPriceAgeHours,
@@ -108,9 +109,16 @@ async function settingsOf(db: TenantDb, tenantId: string): Promise<Settings> {
   return (await db.autopilotSettings.findUnique({ where: { tenantId } })) ?? DEFAULT_AUTOPILOT;
 }
 
-/** Grupos que recebem: os escolhidos na página, ou todos com "Postar neste grupo" ligado. */
-export async function targetGroups(db: TenantDb, settings: Pick<Settings, "groupIds">, options: { activeChannelsOnly?: boolean } = {}) {
-  return db.group.findMany({
+/**
+ * Grupos que recebem: os escolhidos na página, ou todos com "Postar neste grupo" ligado.
+ * `maxGroups` (plano): só os primeiros N (cobre troca para plano menor e escolha acima do limite).
+ */
+export async function targetGroups(
+  db: TenantDb,
+  settings: Pick<Settings, "groupIds">,
+  options: { activeChannelsOnly?: boolean; maxGroups?: number | null } = {},
+) {
+  const groups = await db.group.findMany({
     where: {
       active: true,
       canSend: true,
@@ -120,6 +128,13 @@ export async function targetGroups(db: TenantDb, settings: Pick<Settings, "group
     select: { id: true, channelId: true },
     orderBy: { createdAt: "asc" },
   });
+  return options.maxGroups === undefined || options.maxGroups === null ? groups : groups.slice(0, options.maxGroups);
+}
+
+/** Limite de grupos do plano do tenant (null = ilimitado; sem plano = 0). */
+async function planMaxGroups(tenantId: string, prisma: PrismaClient, now: Date): Promise<number | null> {
+  const subscription = await getCurrentSubscription(tenantId, { client: prisma, now });
+  return subscription ? subscription.plan.maxGroups : 0;
 }
 
 /**
@@ -188,7 +203,9 @@ export async function queueManualOffers(deps: AutopilotDeps, now: Date): Promise
   for (const offer of offers) {
     const db = forTenant(offer.tenantId, deps.prisma);
     const settings = await settingsOf(db, offer.tenantId);
-    const groups = await targetGroups(db, settings);
+    // Pagamento pendente: a oferta espera (não vira post) até voltar a enviar.
+    if (await getSendingBlock(offer.tenantId, { client: deps.prisma, now })) continue;
+    const groups = await targetGroups(db, settings, { maxGroups: await planMaxGroups(offer.tenantId, deps.prisma, now) });
     const requestedAt = offer.sendRequestedAt ?? now;
     const expiresAt = new Date(requestedAt.getTime() + MANUAL_POST_MAX_DELAY_MS);
     if (groups.length === 0 && expiresAt > now) continue; // espera ligar algum grupo
@@ -337,6 +354,8 @@ export async function pickForTenant(deps: AutopilotDeps, tenantId: string, now: 
   if (!settings.enabled) return { picked: false, reason: "desligado" };
   if (!isWithinWindow(settings, now)) return { picked: false, reason: "fora da janela" };
   if (!pickIsDue(settings, now, deps.fast ? FAST_MODE.pickIntervalMs : undefined)) return { picked: false, reason: "ritmo" };
+  // Sem pagamento confirmado / e-mail não confirmado: envios pausados (antes de olhar limites do plano).
+  if (await getSendingBlock(tenantId, { client: deps.prisma, now })) return { picked: false, reason: "pagamento pendente" };
 
   const [maxOffers, sentToday, pending] = await Promise.all([
     planDailyOffers(tenantId, deps.prisma, now),
@@ -346,7 +365,7 @@ export async function pickForTenant(deps: AutopilotDeps, tenantId: string, now: 
   const plannedOffers = new Set([...sentToday, ...pending.map((p) => p.offerId)]);
   if (plannedOffers.size >= maxOffers) return { picked: false, reason: "limite do plano" };
 
-  const allGroups = await targetGroups(db, settings, { activeChannelsOnly: true });
+  const allGroups = await targetGroups(db, settings, { activeChannelsOnly: true, maxGroups: await planMaxGroups(tenantId, deps.prisma, now) });
   // Número no limite do dia (aquecimento): não escolhe oferta que não teria como sair.
   const groups = await groupsWithChannelRoom(db, allGroups, settings, now);
   if (allGroups.length > 0 && groups.length === 0) {
@@ -484,6 +503,7 @@ export async function dispatchChannel(
   if (!isWithinWindow(settings, now)) return skip("fora da janela");
   const socket = deps.getSocket(channel.id);
   if (!socket) return skip("sem conexão neste worker");
+  if (await getSendingBlock(channel.tenantId, { client: deps.prisma, now })) return skip("pagamento pendente");
 
   const post = await db.post.findFirst({
     where: { status: "SCHEDULED", scheduledAt: { lte: now }, group: { channelId: channel.id } },

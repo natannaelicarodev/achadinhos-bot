@@ -3,6 +3,9 @@
 import {
   autopilotStores,
   forTenant,
+  getCurrentSubscription,
+  NO_SENDING_MESSAGE,
+  planAllowsSending,
   maxOffersPerHour,
   MAX_OFFERS_PER_HOUR,
   type CatalogCategory,
@@ -64,6 +67,11 @@ export async function saveAutopilotSettingsAction(input: AutopilotSettingsInput)
   const data = parsed.data;
   const db = forTenant(user.tenantId);
 
+  // Plano: sem números (Catálogo) não tem piloto; grupos escolhidos não passam do limite do plano.
+  const subscription = await getCurrentSubscription(user.tenantId);
+  if (!subscription || !planAllowsSending(subscription.plan)) return { ok: false, error: NO_SENDING_MESSAGE };
+  const maxPlanGroups = subscription.plan.maxGroups;
+
   // Só lojas que o piloto pode usar (ML só com ML_AUTOPILOT_ENABLED).
   const allowed = autopilotStores();
   const stores = data.stores.filter((s) => allowed.includes(s as Store));
@@ -74,6 +82,9 @@ export async function saveAutopilotSettingsAction(input: AutopilotSettingsInput)
     select: { id: true, channelId: true, postingEnabled: true },
   });
   const groupIds = data.groupIds.filter((id) => groups.some((g) => g.id === id));
+  if (maxPlanGroups !== null && groupIds.length > maxPlanGroups) {
+    return { ok: false, error: `Seu plano permite postar em até ${maxPlanGroups} grupos. Escolha menos grupos ou mude de plano.` };
+  }
   const targets = groupIds.length > 0 ? groups.filter((g) => groupIds.includes(g.id)) : groups.filter((g) => g.postingEnabled);
   const perChannel = new Map<string, number>();
   for (const g of targets) perChannel.set(g.channelId, (perChannel.get(g.channelId) ?? 0) + 1);

@@ -5,9 +5,10 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import type { z } from "zod";
 import { getEnv } from "../env";
-import { sendPasswordResetEmail } from "../email";
+import { sendPasswordResetEmail, sendVerificationEmail } from "../email";
 import { authenticate, createPasswordResetToken, resetPasswordWithToken, signUp } from "./accounts";
-import { deleteSessionCookie, getCurrentSession, setSessionCookie } from "./current";
+import { deleteSessionCookie, getCurrentSession, requireSession, setSessionCookie } from "./current";
+import { createEmailVerification } from "./email-verification";
 import { rateLimit, resetRateLimit } from "./rate-limit";
 import { loginSchema, requestResetSchema, resetPasswordSchema, signUpSchema } from "./schemas";
 import { createSession, invalidateSession } from "./session";
@@ -74,7 +75,27 @@ export async function signUpAction(_prev: FormState, formData: FormData): Promis
 
   const { token, expiresAt } = await createSession(prisma, result.userId);
   await setSessionCookie(token, expiresAt);
+  // Link de confirmação do e-mail (falha no envio não impede a conta: dá para reenviar no painel).
+  await sendVerificationLink(prisma, result.userId, parsed.data.email, parsed.data.name).catch(() => undefined);
   redirect("/painel");
+}
+
+async function sendVerificationLink(prisma: ReturnType<typeof getPrisma>, userId: string, email: string, name: string) {
+  const created = await createEmailVerification(prisma, userId);
+  if (!created.ok) return created;
+  const url = new URL("/verificar-email", getEnv().APP_URL);
+  url.searchParams.set("token", created.token);
+  await sendVerificationEmail({ email, name }, url.toString());
+  return created;
+}
+
+/** "Reenviar link" da faixa "Confirme seu e-mail" (no máximo 1 a cada 2 minutos). */
+export async function resendVerificationAction(): Promise<{ ok: boolean; message: string }> {
+  const { user } = await requireSession();
+  const result = await sendVerificationLink(getPrisma(), user.id, user.email, user.name);
+  if (result.ok) return { ok: true, message: `Link enviado para ${user.email}. Confira a caixa de entrada e o spam.` };
+  if (result.reason === "ALREADY_VERIFIED") return { ok: true, message: "Seu e-mail já está confirmado." };
+  return { ok: false, message: `Espere ${result.retryInSeconds} segundos para pedir outro link.` };
 }
 
 export async function requestPasswordResetAction(_prev: FormState, formData: FormData): Promise<FormState> {

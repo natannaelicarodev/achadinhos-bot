@@ -1,5 +1,5 @@
 // Consumidor da fila "whatsapp": comandos vindos do painel.
-import { forTenant, PlanLimitError, type PrismaClient } from "@achadinhos/db";
+import { forTenant, getSendingBlock, PlanLimitError, type PrismaClient } from "@achadinhos/db";
 import {
   isWhatsappJobName,
   parseWhatsappJob,
@@ -59,6 +59,9 @@ export async function handleWhatsappJob(deps: WhatsappJobDeps, name: string, dat
         const job = parseWhatsappJob("sendTest", data);
         return await testMutex.run(channelId, async () => {
           const now = (deps.now ?? Date.now)();
+          // Pagamento pendente / sem assinatura: envios pausados (inclusive o teste).
+          const block = await getSendingBlock(tenantId, { client: deps.prisma, now: new Date(now) });
+          if (block) return { ok: false, message: block.message };
           const check = checkTestSend(await deps.history.list(channelId), now);
           if (!check.ok) return { ok: false, message: check.message };
           // O grupo precisa ser deste número.

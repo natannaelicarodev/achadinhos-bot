@@ -1,0 +1,23 @@
+{
+  "name": "@achadinhos/billing",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@achadinhos/db": "workspace:*",
+    "zod": "^4.6.5",
+    "nodemailer": "^10.0.14"
+  },
+  "devDependencies": {
+    "vitest": "^5.0.3",
+    "@types/nodemailer": "^8.0.2"
+  }
+}

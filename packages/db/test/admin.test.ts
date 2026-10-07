@@ -14,10 +14,12 @@ afterAll(async () => {
 });
 
 let n = 0;
-async function account(email: string) {
+async function account(email: string, verified = true) {
   const slug = `adm-${++n}`;
   const tenant = await db.prisma.tenant.create({ data: { name: slug, slug } });
-  await db.prisma.user.create({ data: { tenantId: tenant.id, email, name: "X", passwordHash: "x", role: "OWNER" } });
+  await db.prisma.user.create({
+    data: { tenantId: tenant.id, email, name: "X", passwordHash: "x", role: "OWNER", emailVerifiedAt: verified ? new Date() : null },
+  });
   await startTrial(db.prisma, tenant.id);
   return tenant;
 }
@@ -40,7 +42,7 @@ describe("contas administradoras", () => {
     const admin = await account("dona@exemplo.com");
     const other = await account("cliente@exemplo.com");
     const result = await syncAdminAccounts(db.prisma, "Dona@exemplo.com, ninguem@exemplo.com");
-    expect(result).toEqual({ granted: ["dona@exemplo.com"], missing: ["ninguem@exemplo.com"] });
+    expect(result).toMatchObject({ granted: ["dona@exemplo.com"], missing: ["ninguem@exemplo.com"], unverified: [] });
 
     const sub = await getCurrentSubscription(admin.id, { client: db.prisma, now: new Date("2030-01-01") });
     expect(sub).toMatchObject({ status: "ACTIVE", trialEndsAt: null, plan: { code: "admin", reportsLevel: "FULL" } });
@@ -59,5 +61,21 @@ describe("contas administradoras", () => {
     }
     await expect(assertCanAddWhatsappNumber(admin.id, { client: db.prisma })).resolves.toBeUndefined();
     await expect(assertCanEnableGroupPosting(admin.id, { client: db.prisma })).resolves.toBeUndefined();
+  });
+
+  it("SEGURANÇA: e-mail da lista sem confirmação NÃO vira administrador", async () => {
+    const intruder = await account("lista@exemplo.com", false);
+    const result = await syncAdminAccounts(db.prisma, "lista@exemplo.com");
+    expect(result).toMatchObject({ granted: [], unverified: ["lista@exemplo.com"] });
+    expect((await getCurrentSubscription(intruder.id, { client: db.prisma }))?.plan.code).toBe("starter");
+  });
+
+  it("SEGURANÇA: saiu da lista -> direito de administrador revogado (volta ao plano normal)", async () => {
+    const t = await account("ex-admin@exemplo.com");
+    await syncAdminAccounts(db.prisma, "ex-admin@exemplo.com");
+    expect((await getCurrentSubscription(t.id, { client: db.prisma }))?.plan.code).toBe("admin");
+    const result = await syncAdminAccounts(db.prisma, "outra@exemplo.com");
+    expect(result.revoked).toContain(t.id);
+    expect((await getCurrentSubscription(t.id, { client: db.prisma }))?.plan.code).not.toBe("admin");
   });
 });

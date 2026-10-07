@@ -36,6 +36,19 @@ export function SignUpForm() {
         hint="Mínimo de 8 caracteres."
         errors={state.fieldErrors?.password}
       />
+      <div className="grid gap-1">
+        <label className="flex items-start gap-2 text-sm">
+          <input type="checkbox" name="acceptTerms" required className="mt-1" />
+          <span>
+            Li e aceito os{" "}
+            <Link href="/termos" target="_blank" className="underline underline-offset-4">
+              Termos de uso
+            </Link>
+            , inclusive o risco de banimento do número no WhatsApp.
+          </span>
+        </label>
+        {state.fieldErrors?.acceptTerms ? <p className="text-xs text-destructive">{state.fieldErrors.acceptTerms[0]}</p> : null}
+      </div>
       <SubmitButton pendingText="Criando conta...">Criar conta e começar o teste</SubmitButton>
       <p className="text-center text-sm text-muted-foreground">
         Já tem conta?{" "}

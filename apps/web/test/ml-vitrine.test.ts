@@ -100,8 +100,11 @@ describe("vitrine compartilhada do Mercado Livre", () => {
   });
 
   it("administrador do sistema vem do SYSTEM_ADMIN_EMAILS", () => {
-    expect(isSystemAdmin("Dona@Exemplo.com", "outra@x.com, dona@exemplo.com")).toBe(true);
-    expect(isSystemAdmin("cliente@x.com", "dona@exemplo.com")).toBe(false);
-    expect(isSystemAdmin("dona@exemplo.com", "")).toBe(false);
+    const ok = new Date();
+    expect(isSystemAdmin({ email: "Dona@Exemplo.com", emailVerifiedAt: ok }, "outra@x.com, dona@exemplo.com")).toBe(true);
+    expect(isSystemAdmin({ email: "cliente@x.com", emailVerifiedAt: ok }, "dona@exemplo.com")).toBe(false);
+    expect(isSystemAdmin({ email: "dona@exemplo.com", emailVerifiedAt: ok }, "")).toBe(false);
+    // SEGURANÇA: e-mail da lista sem confirmação NÃO é administrador.
+    expect(isSystemAdmin({ email: "dona@exemplo.com", emailVerifiedAt: null }, "dona@exemplo.com")).toBe(false);
   });
 });

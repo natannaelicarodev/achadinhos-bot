@@ -21,6 +21,29 @@ enum UserRole {
   MEMBER
 }
 
+enum EntitlementSource {
+  TRIAL // teste grátis (7 dias, plano do teste)
+  PAYMENT // cobrança paga e conferida no Asaas
+  ADMIN // plano Administrador (SYSTEM_ADMIN_EMAILS com e-mail verificado)
+}
+
+enum PaymentKind {
+  SUBSCRIPTION // cobrança da assinatura recorrente
+  UPGRADE // diferença proporcional da troca para um plano maior
+}
+
+enum BillingActor {
+  SYSTEM
+  USER
+  ADMIN
+  ASAAS
+}
+
+enum BillingCycle {
+  MONTHLY
+  YEARLY
+}
+
 enum SubscriptionStatus {
   TRIALING
   ACTIVE
@@ -105,46 +128,61 @@ model Plan {
 }
 
 model Tenant {
-  id               String                @id @default(cuid())
-  name             String
-  slug             String                @unique
-  createdAt        DateTime              @default(now())
-  updatedAt        DateTime              @updatedAt
-  users            User[]
-  subscriptions    Subscription[]
-  channels         Channel[]
-  groups           Group[]
-  offers           Offer[]
-  posts            Post[]
-  clicks           Click[]
-  conversions      Conversion[]
-  storeCredentials StoreCredential[]
-  whatsAppSessions WhatsAppSession[]
-  whatsAppKeys     WhatsAppSessionKey[]
-  featureRequests  FeatureRequest[]
-  favorites        Favorite[]
-  messageTemplate  MessageTemplate?
-  autopilot        AutopilotSettings?
-  extensionTokens  ExtensionToken[]
-  reportSnapshots  StoreReportSnapshot[]
+  id                   String                @id @default(cuid())
+  name                 String
+  slug                 String                @unique
+  // Cobrança (fase 9): cliente no Asaas e dados da nota/boleto
+  asaasCustomerId      String?               @unique
+  billingName          String?
+  billingDocumentLast4 String? // só os 4 últimos dígitos do CPF/CNPJ (o completo fica só no Asaas, LGPD)
+  billingDocumentHash  String? // HMAC-SHA256 do CPF/CNPJ (irreversível): detecta o mesmo documento em outra conta (abuso do teste grátis)
+  billingLockUntil     DateTime? // trava de operação de cobrança (evita assinatura em dobro por clique duplo)
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  users                User[]
+  subscriptions        Subscription[]
+  payments             Payment[]
+  entitlements         Entitlement[]
+  billingAuditLogs     BillingAuditLog[]
+  channels             Channel[]
+  groups               Group[]
+  offers               Offer[]
+  posts                Post[]
+  clicks               Click[]
+  conversions          Conversion[]
+  storeCredentials     StoreCredential[]
+  whatsAppSessions     WhatsAppSession[]
+  whatsAppKeys         WhatsAppSessionKey[]
+  featureRequests      FeatureRequest[]
+  favorites            Favorite[]
+  messageTemplate      MessageTemplate?
+  autopilot            AutopilotSettings?
+  extensionTokens      ExtensionToken[]
+  reportSnapshots      StoreReportSnapshot[]
+
+  @@index([billingDocumentHash])
 }
 
 // ---------- Auth ----------
 
 model User {
-  id                  String               @id @default(cuid())
-  tenantId            String
-  tenant              Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  email               String               @unique // sempre minúsculo
-  name                String
-  passwordHash        String
-  role                UserRole             @default(MEMBER)
-  createdAt           DateTime             @default(now())
-  updatedAt           DateTime             @updatedAt
-  sessions            Session[]
-  passwordResetTokens PasswordResetToken[]
-  featureRequests     FeatureRequest[]
-  extensionTokens     ExtensionToken[]
+  id                      String                   @id @default(cuid())
+  tenantId                String
+  tenant                  Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  email                   String                   @unique // sempre minúsculo
+  name                    String
+  passwordHash            String
+  role                    UserRole                 @default(MEMBER)
+  emailVerifiedAt         DateTime? // e-mail confirmado pelo link (obrigatório para ser administrador do sistema)
+  termsVersion            String? // versão dos termos de uso aceita (fase 9)
+  termsAcceptedAt         DateTime?
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
+  sessions                Session[]
+  passwordResetTokens     PasswordResetToken[]
+  emailVerificationTokens EmailVerificationToken[]
+  featureRequests         FeatureRequest[]
+  extensionTokens         ExtensionToken[]
 
   @@unique([id, tenantId]) // alvo de FK composta (FeatureRequest)
   @@index([tenantId])
@@ -189,20 +227,124 @@ model PasswordResetToken {
 // ---------- Com tenant (acesso só via forTenant) ----------
 
 model Subscription {
-  id                 String             @id @default(cuid())
-  tenantId           String
-  tenant             Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  planId             String
-  plan               Plan               @relation(fields: [planId], references: [id])
-  status             SubscriptionStatus
-  trialEndsAt        DateTime?
-  currentPeriodStart DateTime
-  currentPeriodEnd   DateTime
-  canceledAt         DateTime?
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
+  id                   String             @id @default(cuid())
+  tenantId             String
+  tenant               Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  planId               String
+  plan                 Plan               @relation(fields: [planId], references: [id])
+  status               SubscriptionStatus
+  trialEndsAt          DateTime?
+  currentPeriodStart   DateTime
+  currentPeriodEnd     DateTime
+  canceledAt           DateTime?
+  // Cobrança (fase 9, Asaas)
+  billingCycle         BillingCycle       @default(MONTHLY)
+  asaasSubscriptionId  String?            @unique // assinatura recorrente no Asaas (null = trial sem plano escolhido / Administrador)
+  pastDueSince         DateTime? // inadimplente desde (vencimento não pago); > 5 dias = envios pausados
+  // Troca de plano agendada: descer / mensal<->anual no próximo vencimento (pendingPlanAt);
+  // subir: quando a cobrança avulsa da diferença (pendingPlanPaymentId) for paga.
+  pendingPlanId        String?
+  pendingBillingCycle  BillingCycle?
+  pendingPlanAt        DateTime?
+  pendingPlanPaymentId String?
+  pendingAmountCents   Int? // valor que a cobrança da troca TEM que ter para liberar o plano
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
 
   @@index([tenantId, status])
+}
+
+/**
+ * Cobranças do Asaas (fase 9): uma linha por cobrança, atualizada pelo webhook.
+ */
+model Payment {
+  id                  String        @id @default(cuid())
+  tenantId            String
+  tenant              Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  asaasPaymentId      String        @unique
+  asaasSubscriptionId String?
+  status              String // status do Asaas: PENDING, CONFIRMED, RECEIVED, OVERDUE, REFUNDED...
+  billingType         String? // PIX, BOLETO, CREDIT_CARD, UNDEFINED
+  valueCents          Int
+  dueDate             DateTime
+  paidAt              DateTime?
+  invoiceUrl          String? // página de pagamento do Asaas (Pix, boleto ou cartão)
+  kind                PaymentKind   @default(SUBSCRIPTION)
+  planId              String? // plano que esta cobrança compra
+  billingCycle        BillingCycle?
+  expectedCents       Int? // valor esperado pelo sistema; pago com valor menor não libera o plano
+  reviewReason        String? // divergência (valor, cliente, assinatura): não libera nada e aparece para o administrador
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  @@unique([id, tenantId])
+  @@index([tenantId, dueDate])
+}
+
+/**
+ * Direito de uso de um plano por um período (fase 9). O plano em vigor do cliente é SEMPRE calculado
+ * daqui (o maior plano com direito válido agora), nunca de um campo editável: cobrança estornada ou
+ * contestada revoga o direito e o plano volta sozinho.
+ */
+model Entitlement {
+  id             String            @id @default(cuid())
+  tenantId       String
+  tenant         Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  planId         String
+  billingCycle   BillingCycle?
+  source         EntitlementSource
+  startsAt       DateTime
+  endsAt         DateTime
+  asaasPaymentId String? // cobrança que comprou este direito (null = teste grátis / administrador)
+  revokedAt      DateTime?
+  revokeReason   String?
+  createdAt      DateTime          @default(now())
+
+  @@unique([id, tenantId])
+  @@index([tenantId, startsAt, endsAt])
+  @@index([asaasPaymentId])
+}
+
+/**
+ * Trilha de auditoria da cobrança: quem fez o quê, quando (cliente, administrador, Asaas, sistema).
+ */
+model BillingAuditLog {
+  id          String       @id @default(cuid())
+  tenantId    String
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  actor       BillingActor
+  actorUserId String?
+  action      String // ex.: subscribe, change_plan, payment_paid, entitlement_revoked, refund, review_flagged
+  details     Json?
+  createdAt   DateTime     @default(now())
+
+  @@unique([id, tenantId])
+  @@index([tenantId, createdAt])
+}
+
+/**
+ * Link de confirmação de e-mail (só o SHA-256 do token fica no banco).
+ */
+model EmailVerificationToken {
+  id        String   @id // SHA-256 do token
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+/**
+ * Eventos do webhook do Asaas já recebidos (o Asaas reenvia: processa uma vez só). Sistema, sem tenant.
+ */
+model AsaasWebhookEvent {
+  id             String    @id // id do evento no Asaas
+  event          String
+  asaasPaymentId String?
+  receivedAt     DateTime  @default(now())
+  processedAt    DateTime?
+  error          String?
 }
 
 model Channel {

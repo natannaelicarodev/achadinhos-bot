@@ -1,13 +1,17 @@
-import { forTenant, getCurrentSubscription } from "@achadinhos/db";
+import { forTenant, getCurrentSubscription, getPrisma, getSendingBlock } from "@achadinhos/db";
 import { STORE_NAMES, type AffiliateStore } from "@achadinhos/stores";
 import type { Metadata } from "next";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { AppSidebar } from "@/components/painel/app-sidebar";
+import { TermsGate } from "@/components/termos/terms-gate";
+import { VerifyEmailBanner } from "@/components/painel/verify-email-banner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { requireSession } from "@/lib/auth/current";
+import { isSystemAdmin } from "@/lib/ml-vitrine";
+import { TERMS_VERSION } from "@/lib/terms";
 import { ALERT_STATUSES, formatPhone } from "@/lib/whatsapp";
 
 export const metadata: Metadata = { title: "Painel — Achadinhos Bot" };
@@ -37,8 +41,15 @@ function SubscriptionBadge({
 export default async function PainelLayout({ children }: { children: ReactNode }) {
   const { user } = await requireSession();
   const db = forTenant(user.tenantId);
-  const [subscription, brokenChannels, pausedChannels, pausedStores] = await Promise.all([
+  // Lido do banco (não da sessão em cache): logo depois do "Aceitar", o painel já abre.
+  const fresh = await db.user.findUnique({ where: { id: user.id }, select: { termsVersion: true, emailVerifiedAt: true } });
+  if (fresh?.termsVersion !== TERMS_VERSION) return <TermsGate />;
+  const admin = isSystemAdmin({ email: user.email, emailVerifiedAt: fresh.emailVerifiedAt });
+  // Cobranças para revisar (só administrador; operação de sistema).
+  const reviewCount = admin ? await getPrisma().payment.count({ where: { reviewReason: { not: null } } }) : 0;
+  const [subscription, sendingBlock, brokenChannels, pausedChannels, pausedStores] = await Promise.all([
     getCurrentSubscription(user.tenantId),
+    getSendingBlock(user.tenantId),
     db.channel.findMany({
       where: { type: "WHATSAPP", status: { in: ALERT_STATUSES } },
       select: { id: true, externalId: true, statusReason: true },
@@ -67,16 +78,44 @@ export default async function PainelLayout({ children }: { children: ReactNode }
 
   return (
     <SidebarProvider>
-      <AppSidebar tenantName={user.tenant.name} userName={user.name} />
+      <AppSidebar tenantName={user.tenant.name} userName={user.name} admin={admin} reviewCount={reviewCount} />
       <SidebarInset>
         <header className="flex h-14 items-center gap-2 border-b px-4">
           <SidebarTrigger />
           <div className="ml-auto">
-            <Link href="/painel/configuracoes">
+            <Link href="/painel/assinatura">
               <SubscriptionBadge subscription={subscription} />
             </Link>
           </div>
         </header>
+        {!fresh.emailVerifiedAt ? (
+          <div className="grid gap-2 px-4 pt-4 md:px-6">
+            <VerifyEmailBanner email={user.email} />
+          </div>
+        ) : null}
+        {sendingBlock && sendingBlock.reason !== "EMAIL_NOT_VERIFIED" ? (
+          <div className="grid gap-2 px-4 pt-4 md:px-6">
+            <Alert variant="destructive" role="alert">
+              <AlertDescription>
+                {sendingBlock.message}{" "}
+                <Link href="/painel/assinatura" className="font-medium underline underline-offset-4">
+                  Ir para Assinatura
+                </Link>
+              </AlertDescription>
+            </Alert>
+          </div>
+        ) : subscription?.status === "PAST_DUE" ? (
+          <div className="grid gap-2 px-4 pt-4 md:px-6">
+            <Alert role="alert" className="border-amber-300 bg-amber-50 text-amber-900 dark:bg-amber-950 dark:text-amber-100">
+              <AlertDescription>
+                Pagamento da assinatura em atraso. Os envios pausam se passar de 5 dias.{" "}
+                <Link href="/painel/assinatura" className="font-medium underline underline-offset-4">
+                  Pagar agora
+                </Link>
+              </AlertDescription>
+            </Alert>
+          </div>
+        ) : null}
         {brokenChannels.length > 0 ? (
           <div className="grid gap-2 px-4 pt-4 md:px-6">
             {brokenChannels.map((channel) => (

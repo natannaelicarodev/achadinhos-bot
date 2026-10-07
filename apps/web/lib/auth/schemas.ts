@@ -12,6 +12,8 @@ export const signUpSchema = z.object({
   name: z.string().trim().min(2, "Informe seu nome.").max(80, "Nome muito longo."),
   email: emailSchema,
   password: passwordSchema,
+  // Caixa "Li e aceito os Termos de uso" (fase 9): obrigatória.
+  acceptTerms: z.literal("on", { message: "Para criar a conta, aceite os Termos de uso." }),
 });
 
 export const loginSchema = z.object({

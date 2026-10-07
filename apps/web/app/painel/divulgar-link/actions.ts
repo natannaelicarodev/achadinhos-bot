@@ -3,6 +3,7 @@
 import {
   forTenant,
   getCurrentSubscription,
+  getSendingBlock,
   getStoreCredentialSecrets,
   NO_SENDING_MESSAGE,
   planAllowsSending,
@@ -420,6 +421,8 @@ export type SendResult = { ok: true; message: string; text: string } | { ok: fal
 export async function sendToGroupsAction(input: z.input<typeof sendSchema>): Promise<SendResult> {
   const { user } = await requireSession();
   if (!(await tenantCanSend(user.tenantId))) return { ok: false, error: NO_SENDING_MESSAGE };
+  const block = await getSendingBlock(user.tenantId);
+  if (block) return { ok: false, error: block.message };
   const parsed = sendSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
   const data = parsed.data;

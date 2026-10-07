@@ -82,7 +82,7 @@ function Invite() {
 export default async function RelatoriosPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const { user } = await requireSession();
   const subscription = await getCurrentSubscription(user.tenantId);
-  const admin = isSystemAdmin(user.email);
+  const admin = isSystemAdmin(user);
 
   if (!subscription || !planAllowsSending(subscription.plan)) {
     return (

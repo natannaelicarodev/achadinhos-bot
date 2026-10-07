@@ -14,7 +14,7 @@ export async function vitrineSetupAction(): Promise<
   { ok: true; token: string; categories: string[]; searches: string[]; amazonCategories: string[] } | { ok: false; error: string }
 > {
   const { user } = await requireSession();
-  if (!isSystemAdmin(user.email)) return { ok: false, error: "Só o administrador do sistema pode ativar a vitrine." };
+  if (!isSystemAdmin(user)) return { ok: false, error: "Só o administrador do sistema pode ativar a vitrine." };
   const token = process.env.ML_VITRINE_TOKEN?.trim();
   if (!token || token.length < 32) {
     return { ok: false, error: "Falta a ML_VITRINE_TOKEN no .env do servidor (mínimo 32 caracteres)." };

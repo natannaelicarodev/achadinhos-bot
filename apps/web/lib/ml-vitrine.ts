@@ -1,3 +1,4 @@
+import { isVerifiedAdmin } from "@achadinhos/db";
 // Vitrine compartilhada do Mercado Livre: produtos que a extensão do ADMINISTRADOR
 // envia (vitrine do portal de afiliados) viram produtos do catálogo central.
 import { createHash, timingSafeEqual } from "node:crypto";
@@ -121,11 +122,13 @@ export function isValidVitrineToken(authorization: string | null, expected: stri
   return timingSafeEqual(sha(given), sha(configured));
 }
 
-/** Administradores do sistema (SYSTEM_ADMIN_EMAILS, separados por vírgula). */
-export function isSystemAdmin(email: string, list: string | undefined = process.env.SYSTEM_ADMIN_EMAILS): boolean {
-  const admins = (list ?? "")
-    .split(",")
-    .map((e) => e.trim().toLowerCase())
-    .filter(Boolean);
-  return admins.includes(email.trim().toLowerCase());
+/**
+ * Administrador do sistema: e-mail em SYSTEM_ADMIN_EMAILS E confirmado pelo link (sem confirmar,
+ * qualquer um poderia se cadastrar com o e-mail da lista).
+ */
+export function isSystemAdmin(
+  user: { email: string; emailVerifiedAt: Date | null },
+  list: string | undefined = process.env.SYSTEM_ADMIN_EMAILS,
+): boolean {
+  return isVerifiedAdmin(user, list);
 }
